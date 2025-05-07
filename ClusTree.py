@@ -85,6 +85,12 @@ class Node(base.Base):
         if entry.child is not None:
             entry.child.parent = self
 
+    def aggregate_cf(self):
+        cf = ClusterFeature()
+        for entry in self.entries:
+            cf.addCluster(entry.cf_data)
+        return cf
+
     def is_full(self):
         return len(self.entries) >= self.MAX_ENTRIES
 
