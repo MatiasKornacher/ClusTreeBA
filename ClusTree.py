@@ -14,6 +14,9 @@ class ClusTree(base.Clusterer):
     def predict_one(self, x):
         #ToDo
 
+    def split(self, node):
+        max_dist = -1
+
 class ClusterFeature(base.Base):
     def __init__(self, n=0, LS=None, SS=None):
         self.n = n
@@ -23,14 +26,23 @@ class ClusterFeature(base.Base):
         def center(self):
             if self.n == 0:
                 return None
-            return [x / self.n for x in self.LS]  # ToDo add weight
+            return {k: self.LS[k] / self.n for k in self.LS}
 
         def addObject(self, object):
             self.n += 1
+            if self.LS is None:
+                self.LS = object.copy()
+                self.SS = {k: v ** 2 for k, v in object.items()}
+            else:
+                for x in object:
+                    self.LS[x] += object[x]
+                    self.SS[x] += object[x] ** 2
 
         def addCluster(self, cf):
             self.n += cf.n
-            # ToDo
+            for x in cf.LS:
+                self.LS[x] += cf.LS[x]
+                self.SS[x] += cf.SS[x]
 
         def clear(self):
             self.n = 0
@@ -44,9 +56,16 @@ class Entry(base.Base):
         self.cf_buffer = cf_buffer
         self.child = child
 
-    def aggregateEntry(self):  # ToDo
+    def aggregateEntry(self):
+        if self.child is None:
+            return self.cf_data
+        agg_cf = ClusterFeature()
+        for entry in self.child.entries:
+            agg_cf.addCluster(entry.cf_data)
+        return agg_cf
 
-    def mergeWith(self):  # ToDo
+    def mergeWith(self, other):
+        self.cf_data.addCluster(other.cf_data)
 
 class Node(base.Base):
     MAX_ENTRIES = 3
@@ -69,4 +88,20 @@ class Node(base.Base):
     def is_full(self):
         return len(self.entries) >= self.MAX_ENTRIES
 
-    def mergeEntries(self):  # ToDo
+    def mergeEntries(self):
+        while len(self.entries) > self.MAX_ENTRIES:
+            min_dist = float('inf')
+            pair = None
+            for i in range(len(self.entries)):
+                for j in range(i + 1, len(self.entries)):
+                    d = self._euclidean_distance(
+                        self.entries[i].cf_data.center(),
+                        self.entries[j].cf_data.center()
+                    )
+                    if d < min_dist:
+                        min_dist = d
+                        pair = (i, j)
+
+            i, j = pair
+            self.entries[i].mergeWith(self.entries[j])
+            del self.entries[j]
