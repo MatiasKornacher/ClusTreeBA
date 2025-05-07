@@ -1,31 +1,35 @@
 from river import base, cluster, stats, utils
 
 class ClusTree(base.Clusterer):
-    def __init__(self, root):
+    def __init__(self, root, lambda_=):#lambda size?
         super().__init__()
         self.root=root
+        self.lambda_ = lambda_
+        self.time = 0
 
     def learn_one(self):
-        #ToDo
+            #ToDo
 
     def predict_one(self, x):
-        #ToDo
+            #ToDo
 
     def split(self, node):
         max_dist = -1
 
 class ClusterFeature(base.Base):
-    def __init__(self, n=0, LS=None, SS=None):
+    def __init__(self, n=0, LS=None, SS=None, timestamp=0):
         self.n = n
         self.LS = LS
         self.SS = SS
+        self.timestamp = timestamp
 
         def center(self):
             if self.n == 0:
                 return None
             return {k: self.LS[k] / self.n for k in self.LS}
 
-        def addObject(self, object):
+        def add_object(self, object, current_time, lambda_):
+            self.decay(current_time, lambda_)
             self.n += 1
             if self.LS is None:
                 self.LS = object.copy()
@@ -34,12 +38,32 @@ class ClusterFeature(base.Base):
                 for x in object:
                     self.LS[x] += object[x]
                     self.SS[x] += object[x] ** 2
+            self.timestamp = timestamp
 
-        def addCluster(self, cf):
+        def add_cluster(self, cf, current_time, lambda_):
+            cf.decay(current_time, lambda_)
+            self.decay(current_time, lambda_)
             self.n += cf.n
-            for x in cf.LS:
-                self.LS[x] += cf.LS[x]
-                self.SS[x] += cf.SS[x]
+            if self.LS is None:
+                self.LS = cf.LS[:]
+                self.SS = cf.SS[:]
+            else:
+                for x in cf.LS:
+                    self.LS[x] += cf.LS[x]
+                    self.SS[x] += cf.SS[x]
+
+        def decay(self, current_time, lambda_):
+            dt = current_time - self.timestamp
+            if dt <= 0: #check for no time passed
+                return
+            decay_factor = 2 ** (-lambda_ * dt)#beta=2 like in paper
+            self.n *= decay_factor
+            if self.LS is not None:
+                self.LS = [x * decay_factor for x in self.LS]
+            if self.SS is not None:
+                self.SS = [x * decay_factor for x in self.SS]
+            self.timestamp = current_time
+
 
         def clear(self):
             self.n = 0
@@ -53,7 +77,7 @@ class Entry(base.Base):
         self.cf_buffer = cf_buffer
         self.child = child
 
-    def aggregateEntry(self):
+    def aggregate_entry(self):
         if self.child is None:
             return self.cf_data
         agg_cf = ClusterFeature()
@@ -61,8 +85,8 @@ class Entry(base.Base):
             agg_cf.addCluster(entry.cf_data)
         return agg_cf
 
-    def mergeWith(self, other):
-        self.cf_data.addCluster(other.cf_data)
+    def merge_with(self, other):
+        self.cf_data.add_cluster(other.cf_data)
 
 class Node(base.Base):
     MAX_ENTRIES = 3
@@ -76,7 +100,7 @@ class Node(base.Base):
 
     def add_entry(self, entry):
         if len(self.entries) >= self.MAX_ENTRIES:
-        # exception
+                # exception needed
 
         self.entries.append(entry)
         if entry.child is not None:
@@ -85,13 +109,13 @@ class Node(base.Base):
     def aggregate_cf(self):
         cf = ClusterFeature()
         for entry in self.entries:
-            cf.addCluster(entry.cf_data)
+            cf.add_cluster(entry.cf_data)
         return cf
 
     def is_full(self):
         return len(self.entries) >= self.MAX_ENTRIES
 
-    def mergeEntries(self):
+    def merge_entries(self):
         while len(self.entries) > self.MAX_ENTRIES:
             min_dist = float('inf')
             pair = None
@@ -106,5 +130,5 @@ class Node(base.Base):
                         pair = (i, j)
 
             i, j = pair
-            self.entries[i].mergeWith(self.entries[j])
+            self.entries[i].merge_with(self.entries[j])
             del self.entries[j]
