@@ -1,6 +1,3 @@
-import math
-from collections import defaultdict
-
 from river import base, cluster, stats, utils
 
 class ClusTree(base.Clusterer):
