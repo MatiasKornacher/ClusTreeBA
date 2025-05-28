@@ -1,4 +1,5 @@
 from river import base, cluster, stats, utils
+import math
 
 
 class ClusTree(base.Clusterer):
@@ -63,6 +64,7 @@ class ClusTree(base.Clusterer):
 
 
     def split(self, node):
+        t=self.time
         max_dist = -1
 
         entry1, entry2 = None, None #ToDo prob auslagern
@@ -92,14 +94,14 @@ class ClusTree(base.Clusterer):
 
         if node.parent is None:#check for if parent is the root
             new_root = Node()
-            new_root.add_entry(Entry(cf_data=node1.aggregate_cf(), is_leaf=False, child=node1))
-            new_root.add_entry(Entry(cf_data=node2.aggregate_cf(), is_leaf=False, child=node2))
+            new_root.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node1))
+            new_root.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node2))
             self.root = new_root
         else:
             parent = node.parent
             parent.entries = [e for e in parent.entries if e.child != node]
-            parent.add_entry(Entry(cf_data=node1.aggregate_cf(), is_leaf=False, child=node1))
-            parent.add_entry(Entry(cf_data=node2.aggregate_cf(), is_leaf=False, child=node2))
+            parent.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node1))
+            parent.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node2))
 
             if parent.is_full():
                 self.split(parent)  #recursive split if parent now overflows
@@ -124,17 +126,17 @@ class ClusterFeature(base.Base):
             return None
         return {k: self.LS[k] / self.n for k in self.LS}
 
-    def add_object(self, object, current_time, lambda_):
+    def add_object(self, object_, current_time, lambda_):
         self.decay(current_time, lambda_)
         self.n += 1
         if self.LS is None:
-            self.LS = object.copy()
-            self.SS = {k: v ** 2 for k, v in object.items()}
+            self.LS = object_.copy()
+            self.SS = {k: v ** 2 for k, v in object_.items()}
         else:
-            for x in object:
-                self.LS[x] += object[x]
-                self.SS[x] += object[x] ** 2
-        self.timestamp = timestamp
+            for x in object_:
+                self.LS[x] += object_[x]
+                self.SS[x] += object_[x] ** 2
+        self.timestamp = current_time
 
     def add_cluster(self, cf, current_time, lambda_):
         cf.decay(current_time, lambda_)
@@ -173,12 +175,13 @@ class Entry(base.Base):
         self.cf_buffer = cf_buffer
         self.child = child
 
-    def aggregate_entry(self):
+    def aggregate_entry(self, current_time, lambda_):
         if self.child is None:
             return self.cf_data
         agg_cf = ClusterFeature()
         for entry in self.child.entries:
-            agg_cf.addCluster(entry.cf_data)
+            entry.cf_data.decay(current_time, lambda_)
+            agg_cf.add_cluster(entry.cf_data, current_time, lambda_)
         return agg_cf
 
     def merge_with(self, other):
@@ -202,10 +205,11 @@ class Node(base.Base):
         if entry.child is not None:
             entry.child.parent = self
 
-    def aggregate_cf(self):
+    def aggregate_cf(self, current_time, lambda_):
         cf = ClusterFeature()
         for entry in self.entries:
-            cf.add_cluster(entry.cf_data)
+            entry.cf_data.decay(current_time, lambda_)
+            cf.add_cluster(entry.cf_data, current_time, lambda_)
         return cf
 
     def is_full(self):
