@@ -1,20 +1,116 @@
 from river import base, cluster, stats, utils
 
+
 class ClusTree(base.Clusterer):
-    def __init__(self, root, lambda_=):#lambda size?
+    def __init__(self, root, lambda_=0.1, max_radius=1.0): #max_radius?
         super().__init__()
         self.root=root
         self.lambda_ = lambda_
+        self.max_radius = max_radius
         self.time = 0
 
-    def learn_one(self):
-            #ToDo
+    def learn_one(self, x):
+        self.time += 1
+        t = self.time
+        node = self.root
+        hitchhiker = None
+
+        while not node.is_leaf():
+            # updating current node’s timestamp
+            # ToDo maybe own method
+            for entry in node.entries:
+                entry.cf_data.decay(t, self.lambda_)
+                if entry.cf_buffer:
+                    entry.cf_buffer.decay(t, self.lambda_)
+
+            closest_to_x = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
+
+            
+            if closest_to_x.cf_buffer:
+                #ToDo check if same closest entry
+                hitchhiker = closest_to_x.cf_buffer
+                closest_to_x.cf_buffer = None
+
+        #reached leaf level
+        for entry in node.entries:
+            entry.cf_data.decay(t, self.lambda_)
+
+        if hitchhiker:
+            #check
+            if node.is_full():
+                closest_to_hitchhiker = min(node.entries,key=lambda e: self._euclidean_distance(hitchhiker.center(), e.cf_data.center()))
+                closest_to_hitchhiker.cf_data.add_cluster(hitchhiker, t, self.lambda_)
+            else:
+                node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
+
+
+        closest_to_x = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
+
+        if self._euclidean_distance(x, closest_to_x.cf_data.center()) <= self.max_radius:
+            closest_to_x.cf_data.add_object(x, t, self.lambda_)
+        elif node.is_full():
+            node.merge_entries(self._euclidean_distance)
+            if node.is_full():  # still too full after merging
+                self.split(node)
+                return self.learn_one(x)
+        else:
+            new_cf = ClusterFeature(n=1, LS=x[:], SS=[xi ** 2 for xi in x], timestamp=t)
+            node.add_entry(Entry(cf_data=new_cf, is_leaf=True))
+        return self
 
     def predict_one(self, x):
-            #ToDo
+        #ToDo
+
 
     def split(self, node):
         max_dist = -1
+
+        entry1, entry2 = None, None #ToDo prob auslagern
+        for i in range(len(node.entries)):
+            for j in range(i + 1, len(node.entries)):
+                c1 = node.entries[i].cf_data.center()
+                c2 = node.entries[j].cf_data.center()
+                d = self._euclidean_distance(c1, c2)
+                if d > max_dist:
+                    max_dist = d
+                    entry1, entry2 = node.entries[i], node.entries[j]
+
+        node1 = Node(parent=node.parent)
+        node2 = Node(parent=node.parent)
+        node1.add_entry(entry1)
+        node2.add_entry(entry2)
+
+        for entry in node.entries:
+            if entry in (entry1, entry2):
+                continue
+            d1 = self._euclidean_distance(entry.cf_data.center(), entry1.cf_data.center())
+            d2 = self._euclidean_distance(entry.cf_data.center(), entry2.cf_data.center())
+            if d1 < d2:
+                node1.add_entry(entry)
+            else:
+                node2.add_entry(entry)
+
+        if node.parent is None:#check for if parent is the root
+            new_root = Node()
+            new_root.add_entry(Entry(cf_data=node1.aggregate_cf(), is_leaf=False, child=node1))
+            new_root.add_entry(Entry(cf_data=node2.aggregate_cf(), is_leaf=False, child=node2))
+            self.root = new_root
+        else:
+            parent = node.parent
+            parent.entries = [e for e in parent.entries if e.child != node]
+            parent.add_entry(Entry(cf_data=node1.aggregate_cf(), is_leaf=False, child=node1))
+            parent.add_entry(Entry(cf_data=node2.aggregate_cf(), is_leaf=False, child=node2))
+
+            if parent.is_full():
+                self.split(parent)  #recursive split if parent now overflows
+
+    def _euclidean_distance(self, a, b):
+        if a is None or b is None:
+            return float('inf')
+        if len(a) != len(b):
+            return float('inf')#error but return inf to avoid crash
+        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+
 
 class ClusterFeature(base.Base):
     def __init__(self, n=0, LS=None, SS=None, timestamp=0):
@@ -23,52 +119,52 @@ class ClusterFeature(base.Base):
         self.SS = SS
         self.timestamp = timestamp
 
-        def center(self):
-            if self.n == 0:
-                return None
-            return {k: self.LS[k] / self.n for k in self.LS}
+    def center(self):
+        if self.n == 0:
+            return None
+        return {k: self.LS[k] / self.n for k in self.LS}
 
-        def add_object(self, object, current_time, lambda_):
-            self.decay(current_time, lambda_)
-            self.n += 1
-            if self.LS is None:
-                self.LS = object.copy()
-                self.SS = {k: v ** 2 for k, v in object.items()}
-            else:
-                for x in object:
-                    self.LS[x] += object[x]
-                    self.SS[x] += object[x] ** 2
-            self.timestamp = timestamp
+    def add_object(self, object, current_time, lambda_):
+        self.decay(current_time, lambda_)
+        self.n += 1
+        if self.LS is None:
+            self.LS = object.copy()
+            self.SS = {k: v ** 2 for k, v in object.items()}
+        else:
+            for x in object:
+                self.LS[x] += object[x]
+                self.SS[x] += object[x] ** 2
+        self.timestamp = timestamp
 
-        def add_cluster(self, cf, current_time, lambda_):
-            cf.decay(current_time, lambda_)
-            self.decay(current_time, lambda_)
-            self.n += cf.n
-            if self.LS is None:
-                self.LS = cf.LS[:]
-                self.SS = cf.SS[:]
-            else:
-                for x in cf.LS:
-                    self.LS[x] += cf.LS[x]
-                    self.SS[x] += cf.SS[x]
+    def add_cluster(self, cf, current_time, lambda_):
+        cf.decay(current_time, lambda_)
+        self.decay(current_time, lambda_)
+        self.n += cf.n
+        if self.LS is None:
+            self.LS = cf.LS[:]
+            self.SS = cf.SS[:]
+        else:
+            for x in cf.LS:
+                self.LS[x] += cf.LS[x]
+                self.SS[x] += cf.SS[x]
 
-        def decay(self, current_time, lambda_):
-            dt = current_time - self.timestamp
-            if dt <= 0: #check for no time passed
-                return
-            decay_factor = 2 ** (-lambda_ * dt)#beta=2 like in paper
-            self.n *= decay_factor
-            if self.LS is not None:
-                self.LS = [x * decay_factor for x in self.LS]
-            if self.SS is not None:
-                self.SS = [x * decay_factor for x in self.SS]
-            self.timestamp = current_time
+    def decay(self, current_time, lambda_):
+        dt = current_time - self.timestamp
+        if dt <= 0: #check for no time passed
+            return
+        decay_factor = 2 ** (-lambda_ * dt)#beta=2 like in paper
+        self.n *= decay_factor
+        if self.LS is not None:
+            self.LS = [x * decay_factor for x in self.LS]
+        if self.SS is not None:
+            self.SS = [x * decay_factor for x in self.SS]
+        self.timestamp = current_time
 
 
-        def clear(self):
-            self.n = 0
-            self.LS = None
-            self.SS = None
+    def clear(self):
+        self.n = 0
+        self.LS = None
+        self.SS = None
 
 class Entry(base.Base):
     def __init__(self, cf_data, is_leaf, cf_buffer=None, child=None):
@@ -115,13 +211,13 @@ class Node(base.Base):
     def is_full(self):
         return len(self.entries) >= self.MAX_ENTRIES
 
-    def merge_entries(self):
+    def merge_entries(self,distance_calc):
         while len(self.entries) > self.MAX_ENTRIES:
             min_dist = float('inf')
             pair = None
             for i in range(len(self.entries)):
                 for j in range(i + 1, len(self.entries)):
-                    d = self._euclidean_distance(
+                    d = distance_calc(
                         self.entries[i].cf_data.center(),
                         self.entries[j].cf_data.center()
                     )
