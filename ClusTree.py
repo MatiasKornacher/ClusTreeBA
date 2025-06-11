@@ -16,6 +16,12 @@ class ClusTree(base.Clusterer):
         node = self.root
         hitchhiker = None
 
+        #Handling of empty tree:
+        if not node.entries:
+            new_cf=ClusterFeature(n=1, LS=x.copy(),SS={k: v ** 2 for k, v in x.items()}, timestamp=t)
+            node.add_entry(Entry(cf_data=new_cf, is_leaf=True))
+            return self
+
         while not node.is_leaf():
             # updating current node’s timestamp
             # ToDo maybe own method
@@ -55,19 +61,33 @@ class ClusTree(base.Clusterer):
                 self.split(node)
                 return self.learn_one(x)
         else:
-            new_cf = ClusterFeature(n=1, LS=x[:], SS=[xi ** 2 for xi in x], timestamp=t)
+            new_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v ** 2 for k, v in x.items()},timestamp=t)
             node.add_entry(Entry(cf_data=new_cf, is_leaf=True))
         return self
 
     def predict_one(self, x):
-        #ToDo
+        node=self.root
+        while not node.is_leaf():
+            node = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center())).child
 
+        if not node.entries:
+            return 0#fallback for empty leaf
+
+        closest_index = min(enumerate(node.entries),key=lambda pair: self._euclidean_distance(x, pair[1].cf_data.center()))[0]
+
+        return closest_index
+
+        # closest_entry = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
+        # try:
+        #     return self._kmeans_mc.predict_one(closest_entry.cf_data.center())
+        # except(KeyError, AttributeError):
+        #     return 0
 
     def split(self, node):
         t=self.time
         max_dist = -1
 
-        entry1, entry2 = None, None #ToDo prob auslagern
+        entry1, entry2 = None, None #ToDo maybe own method
         for i in range(len(node.entries)):
             for j in range(i + 1, len(node.entries)):
                 c1 = node.entries[i].cf_data.center()
@@ -106,12 +126,13 @@ class ClusTree(base.Clusterer):
             if parent.is_full():
                 self.split(parent)  #recursive split if parent now overflows
 
-    def _euclidean_distance(self, a, b):
+    @staticmethod
+    def _euclidean_distance(a, b):
         if a is None or b is None:
             return float('inf')
         if len(a) != len(b):
             return float('inf')#error but return inf to avoid crash
-        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a.values(), b.values())))
 
 
 class ClusterFeature(base.Base):
@@ -134,21 +155,22 @@ class ClusterFeature(base.Base):
             self.SS = {k: v ** 2 for k, v in object_.items()}
         else:
             for x in object_:
-                self.LS[x] += object_[x]
-                self.SS[x] += object_[x] ** 2
+                self.LS[x] = self.LS.get(x, 0.0) + object_[x]
+                self.SS[x] = self.SS.get(x, 0.0) + object_[x] ** 2
         self.timestamp = current_time
 
     def add_cluster(self, cf, current_time, lambda_):
         cf.decay(current_time, lambda_)
         self.decay(current_time, lambda_)
         self.n += cf.n
+
         if self.LS is None:
-            self.LS = cf.LS[:]
-            self.SS = cf.SS[:]
+            self.LS = cf.LS.copy()
+            self.SS = cf.SS.copy()
         else:
-            for x in cf.LS:
-                self.LS[x] += cf.LS[x]
-                self.SS[x] += cf.SS[x]
+            for k in cf.LS:
+                self.LS[k] = self.LS.get(k, 0.0) + cf.LS[k]
+                self.SS[k] = self.SS.get(k, 0.0) + cf.SS[k]
 
     def decay(self, current_time, lambda_):
         dt = current_time - self.timestamp
@@ -157,9 +179,13 @@ class ClusterFeature(base.Base):
         decay_factor = 2 ** (-lambda_ * dt)#beta=2 like in paper
         self.n *= decay_factor
         if self.LS is not None:
-            self.LS = [x * decay_factor for x in self.LS]
+            for x in self.LS:
+                self.LS[x] *= decay_factor
+            #self.LS = [x * decay_factor for x in self.LS]
         if self.SS is not None:
-            self.SS = [x * decay_factor for x in self.SS]
+            for x in self.SS:
+                self.SS[x] *= decay_factor
+            #self.SS = [x * decay_factor for x in self.SS]
         self.timestamp = current_time
 
 
@@ -199,8 +225,7 @@ class Node(base.Base):
 
     def add_entry(self, entry):
         if len(self.entries) >= self.MAX_ENTRIES:
-                # exception needed
-
+            raise ValueError("Node is full")
         self.entries.append(entry)
         if entry.child is not None:
             entry.child.parent = self
