@@ -143,9 +143,9 @@ class ClusterFeature(base.Base):
         self.timestamp = timestamp
 
     def center(self):
-        if self.n == 0:
+        if self.n == 0 or self.LS is None:
             return None
-        return {k: self.LS[k] / self.n for k in self.LS}
+        return {k: v / self.n for k, v in self.LS.items()}
 
     def add_object(self, object_, current_time, lambda_):
         self.decay(current_time, lambda_)
