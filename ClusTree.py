@@ -3,12 +3,14 @@ import math
 
 
 class ClusTree(base.Clusterer):
-    def __init__(self, root, lambda_=0.1, max_radius=1.0): #max_radius?
+    def __init__(self, root, lambda_=0.1, max_radius=1.0, tsnap=100, beta=2):
         super().__init__()
         self.root=root
         self.lambda_ = lambda_
         self.max_radius = max_radius
         self.time = 0
+        self.tsnap = tsnap
+        self.beta = beta
 
     def learn_one(self, x):
         self.time += 1
@@ -58,6 +60,8 @@ class ClusTree(base.Clusterer):
         elif node.is_full():
             node.merge_entries(self._euclidean_distance)
             if node.is_full():  # still too full after merging
+                if self.try_discard_insignificant_entry(node):
+                    return self.learn_one(x) #bc true means we removed one
                 self.split(node)
                 return self.learn_one(x)
         else:
@@ -82,6 +86,28 @@ class ClusTree(base.Clusterer):
         #     return self._kmeans_mc.predict_one(closest_entry.cf_data.center())
         # except(KeyError, AttributeError):
         #     return 0
+
+    def try_discard_insignificant_entry(self, node):#check if entry can be removed. return true if removes something, false else
+        if len(node.entries) < node.MAX_ENTRIES: #check if even necessary
+            return False
+
+        threshold = self.beta ** (-self.lambda_ * self.tsnap)
+        least_significant = min(node.entries, key=lambda e: e.cf_data.n)
+
+        if least_significant.cf_data.n < threshold:
+            node.entries.remove(least_significant)
+            self._remove_entry_stats_up_tree(least_significant, node)
+            return True
+
+        return False
+
+    def _remove_entry_stats_up_tree(self, entry, node):
+        cf_to_remove = entry.cf_data
+        while node is not None:
+            for parent_entry in node.entries:
+                if parent_entry.child == node:
+                    parent_entry.cf_data.subtract_cluster(cf_to_remove)
+            node = node.parent
 
     def split(self, node):
         t=self.time
@@ -124,6 +150,8 @@ class ClusTree(base.Clusterer):
             parent.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node2))
 
             if parent.is_full():
+                if self.try_discard_insignificant_entry(parent):
+                    return
                 self.split(parent)  #recursive split if parent now overflows
 
     @staticmethod
@@ -171,6 +199,13 @@ class ClusterFeature(base.Base):
             for k in cf.LS:
                 self.LS[k] = self.LS.get(k, 0.0) + cf.LS[k]
                 self.SS[k] = self.SS.get(k, 0.0) + cf.SS[k]
+
+    def subtract_cluster(self, cf):
+        self.n -= cf.n
+        for k in cf.LS:
+            self.LS[k] -= cf.LS[k]
+        for k in cf.SS:
+            self.SS[k] -= cf.SS[k]
 
     def decay(self, current_time, lambda_):
         dt = current_time - self.timestamp
