@@ -1,5 +1,6 @@
 from river import base, cluster, stats, utils
 import math
+import copy
 
 
 class ClusTree(base.Clusterer):
@@ -10,6 +11,8 @@ class ClusTree(base.Clusterer):
         self.max_radius = max_radius
         self.time = 0
         self.tsnap = tsnap
+        self.snapshots = []
+        self.last_snapshot_time = 0
         self.beta = beta
         self.aggregates = []
         self.use_aggregation = use_aggregation
@@ -191,7 +194,8 @@ class ClusTree(base.Clusterer):
         if len(node.entries) < node.MAX_ENTRIES: #check if even necessary
             return False
 
-        threshold = self.beta ** (-self.lambda_ * self.tsnap)
+        tsince = self.time - self.last_snapshot_time
+        threshold = self.beta ** (-self.lambda_ * tsince)
         least_significant = min(node.entries, key=lambda e: e.cf_data.n)
 
         if least_significant.cf_data.n < threshold:
@@ -253,6 +257,7 @@ class ClusTree(base.Clusterer):
                 if self.try_discard_insignificant_entry(parent):
                     return
                 self.split(parent)  #recursive split if parent now overflows
+        self.take_snapshot()
 
     @staticmethod
     def _euclidean_distance(a, b):
@@ -261,6 +266,10 @@ class ClusTree(base.Clusterer):
         if len(a) != len(b):
             return float('inf')#error but return inf to avoid crash
         return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a.values(), b.values())))
+
+    def take_snapshot(self):
+        self.snapshots.append(copy.deepcopy(self.root))
+        self.last_snapshot_time = self.time
 
 
 class ClusterFeature(base.Base):

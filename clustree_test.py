@@ -199,3 +199,28 @@ def test_aggregate_flush_when_exceeding_capacity():
     # Root should have one new entry from flushed aggregate
     assert len(root.entries) == 1
     assert abs(root.entries[0].cf_data.n - cf_target.n) < 1e-6
+
+def test_snapshot_creates_deep_copy():
+    from ClusTree import ClusTree, Node, ClusterFeature, Entry
+
+    # Set up a simple tree
+    root = Node()
+    cf = ClusterFeature(n=1.0, LS={'x': 1.0}, SS={'x': 1.0}, timestamp=0)
+    root.add_entry(Entry(cf_data=cf, is_leaf=True))
+    clustree = ClusTree(root=root, lambda_=0.1, max_radius=1.0)
+    clustree.time = 50
+
+    # Take a snapshot
+    clustree.take_snapshot()
+
+    # Check snapshot list updated
+    assert len(clustree.snapshots) == 1
+    snapshot_root = clustree.snapshots[0]
+
+    # Modify original tree
+    new_cf = ClusterFeature(n=1.0, LS={'x': 2.0}, SS={'x': 4.0}, timestamp=50)
+    root.add_entry(Entry(cf_data=new_cf, is_leaf=True))
+
+    # Ensure snapshot is unaffected
+    assert len(snapshot_root.entries) == 1  # Still only has the original entry
+    assert snapshot_root.entries[0].cf_data.LS['x'] == 1.0
