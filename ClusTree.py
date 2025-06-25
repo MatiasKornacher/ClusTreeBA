@@ -70,22 +70,25 @@ class ClusTree(base.Clusterer):
         return self
 
     def predict_one(self, x):
-        node=self.root
-        while not node.is_leaf():
-            node = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center())).child
+        leaf_entries = [] #get all leafs, maybe own method
 
-        if not node.entries:
-            return 0#fallback for empty leaf
+        def traverse(node):
+            if node.is_leaf():
+                leaf_entries.extend(node.entries)
+            else:
+                for entry in node.entries:
+                    if entry.child:
+                        traverse(entry.child)
 
-        closest_index = min(enumerate(node.entries),key=lambda pair: self._euclidean_distance(x, pair[1].cf_data.center()))[0]
+        traverse(self.root)
 
-        return closest_index
-
-        # closest_entry = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
-        # try:
-        #     return self._kmeans_mc.predict_one(closest_entry.cf_data.center())
-        # except(KeyError, AttributeError):
-        #     return 0
+        if not leaf_entries:
+            return 0  # fallback
+        closest_entry = min(
+            leaf_entries,
+            key=lambda e: self._euclidean_distance(x, e.cf_data.center())
+        )
+        return closest_entry.cf_data.center()
 
     def try_discard_insignificant_entry(self, node):#check if entry can be removed. return true if removes something, false else
         if len(node.entries) < node.MAX_ENTRIES: #check if even necessary
