@@ -144,3 +144,58 @@ def test_predict_one_uses_nearest_leaf():
     expected_center = cf1.center()
 
     assert abs(prediction['x'] - expected_center['x']) < 1e-6
+
+
+def test_no_aggregation_in_normal_mode():
+    from ClusTree import ClusTree, Node
+
+    root = Node()
+    ct = ClusTree(root=root, lambda_=0.1, max_radius=1.0, use_aggregation=False)
+
+    ct.learn_one({'x': 1.0})
+    ct.learn_one({'x': 1.1})
+    ct.learn_one({'x': 1.2})
+
+    # No aggregation in normal mode
+    assert len(ct.aggregates) == 0
+
+
+def test_aggregate_flush_when_exceeding_capacity():
+    from ClusTree import ClusTree, Node, ClusterFeature
+
+    root = Node()
+    ct = ClusTree(root=root, lambda_=0.1, max_radius=1.0, use_aggregation=True)
+    ct.time = 100  # simulate current time
+
+    # Create 11 aggregates to exceed capacity of 10
+    for i in range(10):
+        cf = ClusterFeature(
+            n=1.0,
+            LS={'x': 1.0 + i},
+            SS={'x': (1.0 + i) ** 2},
+            timestamp=90 + i
+        )
+        ct.aggregates.append(cf)
+
+    # Add one more that should trigger a flush
+    cf_target = ClusterFeature(
+        n=3.0,  # highest n
+        LS={'x': 3.0},
+        SS={'x': 9.0},
+        timestamp=80  # oldest
+    )
+    ct.aggregates.append(cf_target)
+
+    # Verify precondition
+    assert len(ct.aggregates) == 11
+
+    # Insert a new object (should trigger flush)
+    ct.aggregate_or_insert({'x': 5.0})
+
+    # Check that one aggregate was flushed
+    assert len(ct.aggregates) == 10
+    assert cf_target not in ct.aggregates
+
+    # Root should have one new entry from flushed aggregate
+    assert len(root.entries) == 1
+    assert abs(root.entries[0].cf_data.n - cf_target.n) < 1e-6
