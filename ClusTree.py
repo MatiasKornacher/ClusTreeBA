@@ -3,7 +3,7 @@ import math
 
 
 class ClusTree(base.Clusterer):
-    def __init__(self, root, lambda_=0.1, max_radius=1.0, tsnap=100, beta=2):
+    def __init__(self, root, lambda_=0.1, max_radius=1.0, tsnap=100, beta=2, use_aggregation=False):
         super().__init__()
         self.root=root
         self.lambda_ = lambda_
@@ -11,16 +11,25 @@ class ClusTree(base.Clusterer):
         self.time = 0
         self.tsnap = tsnap
         self.beta = beta
+        self.aggregates = []
+        self.use_aggregation = use_aggregation
 
     def learn_one(self, x):
         self.time += 1
+        if self.use_aggregation:
+            self.aggregate_or_insert(x)
+        else:
+            self._insert_x(x)
+        return self
+
+    def _insert_x(self,x):
         t = self.time
         node = self.root
         hitchhiker = None
 
-        #Handling of empty tree:
+        # Handling of empty tree:
         if not node.entries:
-            new_cf=ClusterFeature(n=1, LS=x.copy(),SS={k: v ** 2 for k, v in x.items()}, timestamp=t)
+            new_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v ** 2 for k, v in x.items()}, timestamp=t)
             node.add_entry(Entry(cf_data=new_cf, is_leaf=True))
             return self
 
@@ -30,24 +39,21 @@ class ClusTree(base.Clusterer):
 
             closest_to_x = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
 
-            
             if closest_to_x.cf_buffer:
-                #ToDo check if same closest entry
+                hitchhiker = closest_to_x.cf_buffer
                 hitchhiker = closest_to_x.cf_buffer
                 closest_to_x.cf_buffer = None
 
-        #reached leaf level
-        for entry in node.entries:
-            entry.cf_data.decay(t, self.lambda_)
+        # reached leaf level
+        node.decay_all_entries(t, self.lambda_)
 
         if hitchhiker:
-            #check
+            # check
             if node.is_full():
-                closest_to_hitchhiker = min(node.entries,key=lambda e: self._euclidean_distance(hitchhiker.center(), e.cf_data.center()))
+                closest_to_hitchhiker = min(node.entries, key=lambda e: self._euclidean_distance(hitchhiker.center(),e.cf_data.center()))
                 closest_to_hitchhiker.cf_data.add_cluster(hitchhiker, t, self.lambda_)
             else:
                 node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
-
 
         closest_to_x = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
 
@@ -57,13 +63,79 @@ class ClusTree(base.Clusterer):
             node.merge_entries(self._euclidean_distance)
             if node.is_full():  # still too full after merging
                 if self.try_discard_insignificant_entry(node):
-                    return self.learn_one(x) #bc true means we removed one
+                    return self.learn_one(x)  # bc true means we removed one
                 self.split(node)
                 return self.learn_one(x)
         else:
-            new_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v ** 2 for k, v in x.items()},timestamp=t)
+            new_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v ** 2 for k, v in x.items()}, timestamp=t)
             node.add_entry(Entry(cf_data=new_cf, is_leaf=True))
         return self
+
+
+    def learn_one_from_cf(self, cf):#ToDo DRY-try to extract common things to external method
+        # Same logic as learn_one, but bypasses object-to-CF conversion
+        x = cf.center()
+        t = self.time + 1
+        self.time = t
+        node = self.root
+        hitchhiker = None
+
+        while not node.is_leaf():
+            node.decay_all_entries(t, self.lambda_)
+            closest = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
+            if closest.cf_buffer:
+                hitchhiker = closest.cf_buffer
+                closest.cf_buffer = None
+            node = closest.child
+
+        node.decay_all_entries(t, self.lambda_)
+
+        if hitchhiker:
+            if node.is_full():
+                closest = min(node.entries,
+                              key=lambda e: self._euclidean_distance(hitchhiker.center(), e.cf_data.center()))
+                closest.cf_data.add_cluster(hitchhiker, t, self.lambda_)
+            else:
+                node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
+
+        closest = min(node.entries,
+                      key=lambda e: self._euclidean_distance(x, e.cf_data.center())) if node.entries else None
+
+        if closest and self._euclidean_distance(x, closest.cf_data.center()) <= self.max_radius:
+            closest.cf_data.add_cluster(cf, t, self.lambda_)
+        elif node.is_full():
+            node.merge_entries(self._euclidean_distance)
+            if node.is_full():
+                self.split(node)
+                return self.learn_one_from_cf(cf)
+        else:
+            node.add_entry(Entry(cf_data=cf, is_leaf=True))
+
+    def aggregate_or_insert(self, x, max_aggregates=10):#max_aggregates?
+        t = self.time
+        closest_cf = None
+        closest_dist = float('inf')
+
+        # Find the closest aggregate within max_radius
+        for cf in self.aggregates:
+            dist = self._euclidean_distance(x, cf.center())
+            if dist < closest_dist and dist <= self.max_radius:
+                closest_cf = cf
+                closest_dist = dist
+
+        # If a close enough aggregate was found, update it
+        if closest_cf:
+            closest_cf.add_object(x, current_time=t, lambda_=self.lambda_)
+
+        else:
+            new_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v ** 2 for k, v in x.items()},timestamp=t)
+            self.aggregates.append(new_cf)
+
+        if len(self.aggregates) > max_aggregates:
+            # Sort by most full (descending n? or should be ascending), then oldest
+            self.aggregates.sort(key=lambda cf: (-cf.n, cf.timestamp))
+            cf_to_insert = self.aggregates.pop(0)
+            self.learn_one_from_cf(cf_to_insert)
 
     def predict_one(self, x):
         leaf_entries = [] #get all leafs, maybe own method
