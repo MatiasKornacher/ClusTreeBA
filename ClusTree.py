@@ -111,10 +111,39 @@ class ClusTree(base.Clusterer):
         else:
             node.add_entry(Entry(cf_data=cf, is_leaf=True))
 
+    def update_max_radius_from_leaves(self):
+        leaf_vars = []
+
+        def collect_leaf_vars(node):
+            if node.is_leaf():
+                for entry in node.entries:
+                    cf = entry.cf_data
+                    if cf.n > 0:
+                        dim_vars = []
+                        for k in cf.LS:
+                            mean = cf.LS[k] / cf.n
+                            var = (cf.SS[k] / cf.n) - (mean ** 2)
+                            if var > 0:
+                                dim_vars.append(var)
+                        if dim_vars:
+                            avg_var = sum(dim_vars) / len(dim_vars)
+                            leaf_vars.append(avg_var)
+            else:
+                for entry in node.entries:
+                    if entry.child:
+                        collect_leaf_vars(entry.child)
+
+        collect_leaf_vars(self.root)
+
+        if leaf_vars:
+            self.max_radius = sum(leaf_vars) / len(leaf_vars)
+
     def aggregate_or_insert(self, x, max_aggregates=10):#max_aggregates?
         t = self.time
         closest_cf = None
         closest_dist = float('inf')
+
+        self.update_max_radius_from_leaves()
 
         # Find the closest aggregate within max_radius
         for cf in self.aggregates:
