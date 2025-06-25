@@ -26,11 +26,7 @@ class ClusTree(base.Clusterer):
 
         while not node.is_leaf():
             # updating current node’s timestamp
-            # ToDo maybe own method
-            for entry in node.entries:
-                entry.cf_data.decay(t, self.lambda_)
-                if entry.cf_buffer:
-                    entry.cf_buffer.decay(t, self.lambda_)
+            node.decay_all_entries(t, self.lambda_)
 
             closest_to_x = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
 
@@ -295,3 +291,9 @@ class Node(base.Base):
             i, j = pair
             self.entries[i].merge_with(self.entries[j])
             del self.entries[j]
+
+    def decay_all_entries(self, current_time, lambda_):
+        for entry in self.entries:
+            entry.cf_data.decay(current_time, lambda_)
+            if entry.cf_buffer:
+                entry.cf_buffer.decay(current_time, lambda_)

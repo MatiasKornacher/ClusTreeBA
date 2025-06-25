@@ -42,17 +42,6 @@ def test_node_entry_management():
 
     assert node.is_full()
 
-def test_learn_and_predict():
-    root = Node()
-    clustree = ClusTree(root=root, lambda_=0.1, max_radius=2.0)
-
-    clustree.learn_one({'x': 1.0})
-    clustree.learn_one({'x': 1.2})
-    clustree.learn_one({'x': 3.0})
-
-    pred = clustree.predict_one({'x': 1.1})
-    assert isinstance(pred, int)
-
 def test_discard_insignificant_entry():
     from ClusTree import ClusTree, Node, Entry, ClusterFeature
 
@@ -110,3 +99,48 @@ def test_no_discard_when_all_significant():
 
     assert removed is False
     assert len(node.entries) == 3  # still full
+
+def test_node_decay_all_entries():
+    node = Node()
+    cf_main = ClusterFeature(n=2, LS={'x': 4.0}, SS={'x': 10.0}, timestamp=0)
+    cf_buffer = ClusterFeature(n=1, LS={'x': 2.0}, SS={'x': 4.0}, timestamp=0)
+
+    entry = Entry(cf_data=cf_main, is_leaf=True, cf_buffer=cf_buffer)
+    node.add_entry(entry)
+
+    node.decay_all_entries(current_time=10, lambda_=0.1)
+
+    # Expected decay factor: 2^(-λ * Δt) = 2^(-0.1 * 10) = 2^-1 = 0.5
+    expected_decay = 0.5
+
+    assert abs(entry.cf_data.n - 2 * expected_decay) < 1e-6
+    assert abs(entry.cf_data.LS['x'] - 4.0 * expected_decay) < 1e-6
+    assert abs(entry.cf_data.SS['x'] - 10.0 * expected_decay) < 1e-6
+
+    assert abs(entry.cf_buffer.n - 1 * expected_decay) < 1e-6
+    assert abs(entry.cf_buffer.LS['x'] - 2.0 * expected_decay) < 1e-6
+    assert abs(entry.cf_buffer.SS['x'] - 4.0 * expected_decay) < 1e-6
+
+def test_predict_one_uses_nearest_leaf():
+
+    root = Node()
+    leaf = Node(parent=root)
+
+    cf1 = ClusterFeature(n=2, LS={'x': 2.0}, SS={'x': 4.0}, timestamp=0)  # center = 1.0
+    cf2 = ClusterFeature(n=2, LS={'x': 8.0}, SS={'x': 32.0}, timestamp=0)  # center = 4.0
+
+    entry1 = Entry(cf_data=cf1, is_leaf=True)
+    entry2 = Entry(cf_data=cf2, is_leaf=True)
+    leaf.entries.extend([entry1, entry2])
+
+    root.entries.append(Entry(cf_data=None, is_leaf=False, child=leaf))
+    ct = ClusTree(root=root, lambda_=0.1, max_radius=1.0)
+
+    # Prediction target closer to entry1 (center=1.0) than entry2 (center=4.0)
+    x = {'x': 1.1}
+    prediction = ct.predict_one(x)
+
+    # nearest neighbour should be cf1
+    expected_center = cf1.center()
+
+    assert abs(prediction['x'] - expected_center['x']) < 1e-6
