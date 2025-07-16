@@ -23,12 +23,12 @@ class ClusTree(base.Clusterer):
     def learn_one(self, x):
         self.time += 1
         if self.use_aggregation:
-            self.aggregate_or_insert(x)
+            self.aggregate_or_update(x)
         else:
-            self._insert_x(x)
+            self.update(x)
         return self
 
-    def _insert_x(self,x):
+    def update(self,x):
         t = self.time
         node = self.root
         hitchhiker = None
@@ -144,7 +144,7 @@ class ClusTree(base.Clusterer):
         if leaf_vars:
             self.max_radius = sum(leaf_vars) / len(leaf_vars)
 
-    def aggregate_or_insert(self, x, max_aggregates=10):#max_aggregates?TODO global
+    def aggregate_or_update(self, x, max_aggregates=10):#max_aggregates?TODO global
         t = self.time
         closest_cf = None
         closest_dist = float('inf')
