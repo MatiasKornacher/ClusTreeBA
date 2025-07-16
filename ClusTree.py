@@ -1,6 +1,9 @@
 from river import base, cluster, stats, utils
 import math
+import numpy as np
+from sklearn.metrics.pairwise import euclidean_distances
 import copy
+
 
 
 class ClusTree(base.Clusterer):
@@ -141,7 +144,7 @@ class ClusTree(base.Clusterer):
         if leaf_vars:
             self.max_radius = sum(leaf_vars) / len(leaf_vars)
 
-    def aggregate_or_insert(self, x, max_aggregates=10):#max_aggregates?
+    def aggregate_or_insert(self, x, max_aggregates=10):#max_aggregates?TODO global
         t = self.time
         closest_cf = None
         closest_dist = float('inf')
@@ -163,8 +166,7 @@ class ClusTree(base.Clusterer):
             new_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v ** 2 for k, v in x.items()},timestamp=t)
             self.aggregates.append(new_cf)
 
-        if len(self.aggregates) > max_aggregates:
-            # Sort by most full (descending n? or should be ascending), then oldest
+        if len(self.aggregates) > max_aggregates: 
             self.aggregates.sort(key=lambda cf: (-cf.n, cf.timestamp))
             cf_to_insert = self.aggregates.pop(0)
             self.learn_one_from_cf(cf_to_insert)
@@ -259,17 +261,30 @@ class ClusTree(base.Clusterer):
                 self.split(parent)  #recursive split if parent now overflows
         self.take_snapshot()
 
+    # @staticmethod
+    # def _euclidean_distance(a, b):
+    #     if a is None or b is None:
+    #         return float('inf')
+    #     if len(a) != len(b):
+    #         return float('inf')#error but return inf to avoid crash
+    #     # return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a.values(), b.values())))
+    #     keys = sorted(a.keys())
+    #     return math.sqrt(
+    #         sum((a[k] - b.get(k, 0.0)) ** 2 for k in keys)
+    #     )#ToDo check which way to calculate
+    # def take_snapshot(self):
+    #     self.snapshots.append(copy.deepcopy(self.root))
+    #     self.last_snapshot_time = self.time
+
     @staticmethod
     def _euclidean_distance(a, b):
         if a is None or b is None:
-            return float('inf')
-        if len(a) != len(b):
-            return float('inf')#error but return inf to avoid crash
-        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a.values(), b.values())))
+             return float('inf')
+        keys = sorted(set(a.keys()) | set(b.keys()))
+        vec_a = np.array([a.get(k, 0.0) for k in keys]).reshape(1, -1)
+        vec_b = np.array([b.get(k, 0.0) for k in keys]).reshape(1, -1)
+        return float(euclidean_distances(vec_a, vec_b)[0, 0])
 
-    def take_snapshot(self):
-        self.snapshots.append(copy.deepcopy(self.root))
-        self.last_snapshot_time = self.time
 
 
 class ClusterFeature(base.Base):

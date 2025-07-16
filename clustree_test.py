@@ -1,5 +1,6 @@
 import pytest
 import math
+import numpy as np
 from ClusTree import ClusTree, ClusterFeature, Entry, Node
 
 
@@ -224,3 +225,33 @@ def test_snapshot_creates_deep_copy():
     # Ensure snapshot is unaffected
     assert len(snapshot_root.entries) == 1  # Still only has the original entry
     assert snapshot_root.entries[0].cf_data.LS['x'] == 1.0
+
+euclid = ClusTree._euclidean_distance
+
+def test_zero_distance_identical_dicts():
+    a = {'x': 1.5, 'y': -2.0, 'z': 0.0}
+    b = {'x': 1.5, 'y': -2.0, 'z': 0.0}
+    assert euclid(a, b) == pytest.approx(0.0)
+
+def test_simple_one_dimensional():
+    a = {'x': 1.0}
+    b = {'x': 4.0}
+    # distance is |1 - 4| = 3
+    assert euclid(a, b) == pytest.approx(3.0)
+
+def test_union_of_keys_fills_missing_with_zero():
+    a = {'x': 1.0, 'y': 2.0}
+    b = {'x': 4.0}
+    # sqrt((1-4)^2 + (2-0)^2) = sqrt(9 + 4) = sqrt(13)
+    expected = math.sqrt(13)
+    assert euclid(a, b) == pytest.approx(expected)
+
+def test_commutativity():
+    a = {'x': 3.2, 'y': -1.1}
+    b = {'x': -0.8, 'y':  5.5}
+    assert euclid(a, b) == pytest.approx(euclid(b, a))
+
+def test_none_inputs_return_inf():
+    assert euclid(None, {'x':1}) == math.inf
+    assert euclid({'x':1}, None) == math.inf
+    assert euclid(None, None)        == math.inf
