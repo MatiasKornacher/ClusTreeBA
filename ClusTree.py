@@ -133,7 +133,7 @@ class ClusTree(base.Clusterer):
         if len(self.aggregates) > max_aggregates: 
             self.aggregates.sort(key=lambda cf: (-cf.n, cf.timestamp))
             cf_to_insert = self.aggregates.pop(0)
-            self.update_one_from_cf(cf_to_insert)
+            self.update_one(cf_to_insert)
 
     def predict_one(self, x):
         leaf_entries = [] #get all leafs, maybe own method
