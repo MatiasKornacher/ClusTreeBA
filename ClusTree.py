@@ -81,50 +81,6 @@ class ClusTree(base.Clusterer):
                 node.add_entry(Entry(cf_data=input_cf, is_leaf=True))
         return self
 
-
-    def update_one_from_cf(self, cf):
-        # Same logic as update_one, but bypasses object-to-CF conversion
-        x = cf.center()
-        self.time += 1
-        t = self.time
-        node = self.root
-        hitchhiker = None
-
-        # Handling of empty tree:
-        if not node.entries:
-            node.add_entry(Entry(cf_data=cf, is_leaf=True))
-            return self
-        node.decay_all_entries(t, self.lambda_)
-
-        if not node.is_leaf():
-            closest = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
-            if closest.cf_buffer:
-                hitchhiker = closest.cf_buffer
-                closest.cf_buffer = None
-            node = closest.child
-
-        elif node.is_leaf():
-            if hitchhiker:
-                if node.is_full():
-                    closest = min(node.entries,
-                                  key=lambda e: self._euclidean_distance(hitchhiker.center(), e.cf_data.center()))
-                    closest.cf_data.add_cluster(hitchhiker, t, self.lambda_)
-                else:
-                    node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
-
-            closest = min(node.entries,
-                          key=lambda e: self._euclidean_distance(x, e.cf_data.center())) if node.entries else None
-
-            if closest and self._euclidean_distance(x, closest.cf_data.center()) <= self.max_radius:
-                closest.cf_data.add_cluster(cf, t, self.lambda_)
-            elif node.is_full():
-                node.merge_entries(self._euclidean_distance)
-                if node.is_full():
-                    self.split(node)
-                    return self.update_one_from_cf(cf)
-            else:
-                node.add_entry(Entry(cf_data=cf, is_leaf=True))
-
     def update_max_radius_from_leaves(self):
         leaf_vars = []
 
