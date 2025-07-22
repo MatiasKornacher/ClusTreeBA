@@ -25,97 +25,105 @@ class ClusTree(base.Clusterer):
         if self.use_aggregation:
             self.aggregate_or_update(x)
         else:
-            self.update(x)
+            self.update_one(x)
         return self
 
-    def update(self,x):
+    def update_one(self,x):
+        self.time += 1
+        t = self.time
+        node = self.root
+        hitchhiker = None
+
+        if isinstance(x, dict):
+            input_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v * v for k, v in x.items()},timestamp=t)
+        elif isinstance(x, ClusterFeature):
+            input_cf = x
+        else:
+            raise TypeError(f"update() expects dict or ClusterFeature, got {type(x)}")
+
+        # Handling of empty tree:
+        if not node.entries:
+            node.add_entry(Entry(cf_data=input_cf, is_leaf=True))
+            return self
+
+        node.decay_all_entries(t, self.lambda_)
+
+        if not node.is_leaf():
+            closest = min(node.entries, key=lambda e: self._euclidean_distance(input_cf.center(), e.cf_data.center()))
+
+            if closest.cf_buffer:
+                hitchhiker = closest.cf_buffer
+                closest.cf_buffer = None
+            node = closest.child
+
+
+        elif node.is_leaf():
+            if hitchhiker:
+                # check
+                if node.is_full():
+                    closest = min(node.entries, key=lambda e: self._euclidean_distance(hitchhiker.center(),e.cf_data.center()))
+                    closest.cf_data.add_cf(hitchhiker, t, self.lambda_)
+                else:
+                    node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
+
+            closest = min(node.entries, key=lambda e: self._euclidean_distance(input_cf, e.cf_data.center()))
+
+            if self._euclidean_distance(input_cf, closest.cf_data.center()) <= self.max_radius:
+                closest.cf_data.add_cf(input_cf, t, self.lambda_)
+            elif node.is_full():
+                node.merge_entries(self._euclidean_distance)
+                if node.is_full():  # still too full after merging
+                    if self.try_discard_insignificant_entry(node):
+                        return self.update_one(input_cf)  # bc true means we removed one
+                    self.split(node)
+                    return self.update_one(input_cf)
+            else:
+                node.add_entry(Entry(cf_data=input_cf, is_leaf=True))
+        return self
+
+
+    def update_one_from_cf(self, cf):
+        # Same logic as update_one, but bypasses object-to-CF conversion
+        x = cf.center()
+        self.time += 1
         t = self.time
         node = self.root
         hitchhiker = None
 
         # Handling of empty tree:
         if not node.entries:
-            new_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v ** 2 for k, v in x.items()}, timestamp=t)
-            node.add_entry(Entry(cf_data=new_cf, is_leaf=True))
+            node.add_entry(Entry(cf_data=cf, is_leaf=True))
             return self
-
-        while not node.is_leaf():
-            # updating current node’s timestamp
-            node.decay_all_entries(t, self.lambda_)
-
-            closest_to_x = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
-
-            if closest_to_x.cf_buffer:
-                hitchhiker = closest_to_x.cf_buffer
-                hitchhiker = closest_to_x.cf_buffer
-                closest_to_x.cf_buffer = None
-
-        # reached leaf level
         node.decay_all_entries(t, self.lambda_)
 
-        if hitchhiker:
-            # check
-            if node.is_full():
-                closest_to_hitchhiker = min(node.entries, key=lambda e: self._euclidean_distance(hitchhiker.center(),e.cf_data.center()))
-                closest_to_hitchhiker.cf_data.add_cluster(hitchhiker, t, self.lambda_)
-            else:
-                node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
-
-        closest_to_x = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
-
-        if self._euclidean_distance(x, closest_to_x.cf_data.center()) <= self.max_radius:
-            closest_to_x.cf_data.add_object(x, t, self.lambda_)
-        elif node.is_full():
-            node.merge_entries(self._euclidean_distance)
-            if node.is_full():  # still too full after merging
-                if self.try_discard_insignificant_entry(node):
-                    return self.learn_one(x)  # bc true means we removed one
-                self.split(node)
-                return self.learn_one(x)
-        else:
-            new_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v ** 2 for k, v in x.items()}, timestamp=t)
-            node.add_entry(Entry(cf_data=new_cf, is_leaf=True))
-        return self
-
-
-    def learn_one_from_cf(self, cf):#ToDo DRY-try to extract common things to external method
-        # Same logic as learn_one, but bypasses object-to-CF conversion
-        x = cf.center()
-        t = self.time + 1
-        self.time = t
-        node = self.root
-        hitchhiker = None
-
-        while not node.is_leaf():
-            node.decay_all_entries(t, self.lambda_)
+        if not node.is_leaf():
             closest = min(node.entries, key=lambda e: self._euclidean_distance(x, e.cf_data.center()))
             if closest.cf_buffer:
                 hitchhiker = closest.cf_buffer
                 closest.cf_buffer = None
             node = closest.child
 
-        node.decay_all_entries(t, self.lambda_)
+        elif node.is_leaf():
+            if hitchhiker:
+                if node.is_full():
+                    closest = min(node.entries,
+                                  key=lambda e: self._euclidean_distance(hitchhiker.center(), e.cf_data.center()))
+                    closest.cf_data.add_cluster(hitchhiker, t, self.lambda_)
+                else:
+                    node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
 
-        if hitchhiker:
-            if node.is_full():
-                closest = min(node.entries,
-                              key=lambda e: self._euclidean_distance(hitchhiker.center(), e.cf_data.center()))
-                closest.cf_data.add_cluster(hitchhiker, t, self.lambda_)
+            closest = min(node.entries,
+                          key=lambda e: self._euclidean_distance(x, e.cf_data.center())) if node.entries else None
+
+            if closest and self._euclidean_distance(x, closest.cf_data.center()) <= self.max_radius:
+                closest.cf_data.add_cluster(cf, t, self.lambda_)
+            elif node.is_full():
+                node.merge_entries(self._euclidean_distance)
+                if node.is_full():
+                    self.split(node)
+                    return self.update_one_from_cf(cf)
             else:
-                node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
-
-        closest = min(node.entries,
-                      key=lambda e: self._euclidean_distance(x, e.cf_data.center())) if node.entries else None
-
-        if closest and self._euclidean_distance(x, closest.cf_data.center()) <= self.max_radius:
-            closest.cf_data.add_cluster(cf, t, self.lambda_)
-        elif node.is_full():
-            node.merge_entries(self._euclidean_distance)
-            if node.is_full():
-                self.split(node)
-                return self.learn_one_from_cf(cf)
-        else:
-            node.add_entry(Entry(cf_data=cf, is_leaf=True))
+                node.add_entry(Entry(cf_data=cf, is_leaf=True))
 
     def update_max_radius_from_leaves(self):
         leaf_vars = []
@@ -169,7 +177,7 @@ class ClusTree(base.Clusterer):
         if len(self.aggregates) > max_aggregates: 
             self.aggregates.sort(key=lambda cf: (-cf.n, cf.timestamp))
             cf_to_insert = self.aggregates.pop(0)
-            self.learn_one_from_cf(cf_to_insert)
+            self.update_one_from_cf(cf_to_insert)
 
     def predict_one(self, x):
         leaf_entries = [] #get all leafs, maybe own method
@@ -261,20 +269,9 @@ class ClusTree(base.Clusterer):
                 self.split(parent)  #recursive split if parent now overflows
         self.take_snapshot()
 
-    # @staticmethod
-    # def _euclidean_distance(a, b):
-    #     if a is None or b is None:
-    #         return float('inf')
-    #     if len(a) != len(b):
-    #         return float('inf')#error but return inf to avoid crash
-    #     # return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a.values(), b.values())))
-    #     keys = sorted(a.keys())
-    #     return math.sqrt(
-    #         sum((a[k] - b.get(k, 0.0)) ** 2 for k in keys)
-    #     )#ToDo check which way to calculate
-    # def take_snapshot(self):
-    #     self.snapshots.append(copy.deepcopy(self.root))
-    #     self.last_snapshot_time = self.time
+    def take_snapshot(self):
+         self.snapshots.append(copy.deepcopy(self.root))
+         self.last_snapshot_time = self.time
 
     @staticmethod
     def _euclidean_distance(a, b):
