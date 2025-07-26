@@ -5,11 +5,12 @@ from sklearn.metrics.pairwise import euclidean_distances
 import copy
 
 
-
 class ClusTree(base.Clusterer):
     def __init__(self, root, lambda_=0.1, max_radius=1.0, tsnap=100, beta=2, use_aggregation=False):
         super().__init__()
         self.root=root
+        self.current_node=self.root
+        self.hitchhiker=None
         self.lambda_ = lambda_
         self.max_radius = max_radius
         self.time = 0
@@ -29,10 +30,8 @@ class ClusTree(base.Clusterer):
         return self
 
     def update_one(self,x):
-        self.time += 1
         t = self.time
-        node = self.root
-        hitchhiker = None
+        node = self.current_node
 
         if isinstance(x, dict):
             input_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v * v for k, v in x.items()},timestamp=t)
@@ -51,25 +50,37 @@ class ClusTree(base.Clusterer):
         if not node.is_leaf():
             closest = min(node.entries, key=lambda e: self._euclidean_distance(input_cf.center(), e.cf_data.center()))
 
+            if self.hitchhiker is not None:
+                #check for same closest entries
+                closest_to_hitch = min(node.entries,key=lambda e: self._euclidean_distance(self.hitchhiker.cf_data.center(), e.cf_data.center()))
+
+                if closest_to_hitch is not closest:
+                    closest_to_hitch.cf_buffer = self.hitchhiker
+                    self.hitchhiker = None
+
             if closest.cf_buffer:
-                hitchhiker = closest.cf_buffer
+                if self.hitchhiker is None:
+                    self.hitchhiker = closest.cf_buffer
+                else:
+                    self.hitchhiker.cf_data.add_cluster(closest.cf_buffer.cf_data, t, self.lambda_)
                 closest.cf_buffer = None
-            node = closest.child
+            self.current_node = closest.child
 
 
-        elif node.is_leaf():
-            if hitchhiker:
+        if node.is_leaf():
+            if self.hitchhiker:
                 # check
                 if node.is_full():
-                    closest = min(node.entries, key=lambda e: self._euclidean_distance(hitchhiker.center(),e.cf_data.center()))
-                    closest.cf_data.add_cf(hitchhiker, t, self.lambda_)
+                    closest_to_hitch = min(node.entries, key=lambda e: self._euclidean_distance(self.hitchhiker.center(),e.cf_data.center()))
+                    closest_to_hitch.cf_data.add_cluster(self.hitchhiker, t, self.lambda_)
                 else:
-                    node.add_entry(Entry(cf_data=hitchhiker, is_leaf=True))
+                    node.add_entry(Entry(cf_data=self.hitchhiker, is_leaf=True))
+                self.hitchhiker=None
 
-            closest = min(node.entries, key=lambda e: self._euclidean_distance(input_cf, e.cf_data.center()))
+            closest = min(node.entries, key=lambda e: self._euclidean_distance(input_cf.center(), e.cf_data.center()))
 
-            if self._euclidean_distance(input_cf, closest.cf_data.center()) <= self.max_radius:
-                closest.cf_data.add_cf(input_cf, t, self.lambda_)
+            if self._euclidean_distance(input_cf.center(), closest.cf_data.center()) <= self.max_radius:
+                closest.cf_data.add_cluster(input_cf, t, self.lambda_)
             elif node.is_full():
                 node.merge_entries(self._euclidean_distance)
                 if node.is_full():  # still too full after merging
@@ -80,6 +91,7 @@ class ClusTree(base.Clusterer):
             else:
                 node.add_entry(Entry(cf_data=input_cf, is_leaf=True))
         return self
+
 
     def update_max_radius_from_leaves(self):
         leaf_vars = []
@@ -131,7 +143,7 @@ class ClusTree(base.Clusterer):
             self.aggregates.append(new_cf)
 
         if len(self.aggregates) > max_aggregates: 
-            self.aggregates.sort(key=lambda cf: (-cf.n, cf.timestamp))
+            self.aggregates.sort(key=lambda agg: (-agg.n, agg.timestamp))
             cf_to_insert = self.aggregates.pop(0)
             self.update_one(cf_to_insert)
 
@@ -171,7 +183,8 @@ class ClusTree(base.Clusterer):
 
         return False
 
-    def _remove_entry_stats_up_tree(self, entry, node):
+    @staticmethod
+    def _remove_entry_stats_up_tree(entry, node):
         cf_to_remove = entry.cf_data
         while node is not None:
             for parent_entry in node.entries:
@@ -241,6 +254,7 @@ class ClusTree(base.Clusterer):
 
 
 class ClusterFeature(base.Base):
+    # noinspection PyPep8Naming
     def __init__(self, n=0, LS=None, SS=None, timestamp=0):
         self.n = n
         self.LS = LS
