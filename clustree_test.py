@@ -178,18 +178,6 @@ def test_aggregate_flush_when_exceeding_capacity():
     # Insert a new object (should trigger flush)
     ct.aggregate_or_update({'x': 5.0})
 
-    print("=== TREE AFTER FLUSH ===")
-    for i, entry in enumerate(ct.root.entries):
-        cf = entry.cf_data
-        print(f"Entry {i}:")
-        if cf is None:
-            print("  [NO CF DATA]")
-        else:
-            print(f"  n = {cf.n}")
-            print(f"  LS = {cf.LS}")
-            print(f"  SS = {cf.SS}")
-            print(f"  timestamp = {cf.timestamp}")
-
     # Check that one aggregate was flushed
     assert len(ct.aggregates) == 10
     assert cf_target not in ct.aggregates

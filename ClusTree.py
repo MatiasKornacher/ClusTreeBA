@@ -1,5 +1,4 @@
 from river import base, cluster, stats, utils
-import math
 from sklearn.metrics.pairwise import euclidean_distances
 import copy
 
@@ -32,7 +31,6 @@ class ClusTree(base.Clusterer):
             input_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v * v for k, v in x.items()}, timestamp=self.time)
             self.pending = input_cf
             while self.pending is not None:
-                print(f"[DEBUG]b root.entries: {[e.cf_data.n for e in self.root.entries]}")
                 self.update_one()
         return self
 
@@ -87,6 +85,7 @@ class ClusTree(base.Clusterer):
 
             # if self._euclidean_distance(self.pending.center(), closest.cf_data.center()) <= self.max_radius:
             #     closest.cf_data.add_cluster(self.pending, t, self.lambda_)
+
             elif node.is_full():
                 if self.new_arrival:# TODO check if new arrival.
                     node.merge_entries(self._euclidean_distance)
@@ -97,6 +96,7 @@ class ClusTree(base.Clusterer):
                     if self.try_discard_insignificant_entry(node):#check before merge???
                         node.add_entry(Entry(cf_data=self.pending))
                         self.pending = None
+                        return
                     self.current_node = self.split(node) #returns parent
                     self.update_one()
                     return
@@ -291,8 +291,6 @@ class ClusTree(base.Clusterer):
 class ClusterFeature(base.Base):
     # noinspection PyPep8Naming
     def __init__(self, n=0, LS=None, SS=None, timestamp=0):
-        if n > 1e12 or math.isinf(n):
-            print(f"[INIT WARNING] Large n in constructor: {n}")
         self.n = n
         self.LS = LS
         self.SS = SS
@@ -301,9 +299,6 @@ class ClusterFeature(base.Base):
     def center(self):
         if self.n == 0 or self.LS is None:
             return None
-        if self.n > 1e12:
-            print(f"[CENTER WARNING] self.n is too large: {self.n}, LS: {self.LS}")
-            raise ValueError("ClusterFeature.n too large in center()")
         return {k: v / self.n for k, v in self.LS.items()}
 
 
