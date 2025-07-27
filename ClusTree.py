@@ -41,7 +41,7 @@ class ClusTree(base.Clusterer):
 
         # Handling of empty tree:
         if not node.entries:
-            node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
+            node.add_entry(Entry(cf_data=self.pending))
             return self
 
         node.decay_all_entries(t, self.lambda_)
@@ -77,7 +77,7 @@ class ClusTree(base.Clusterer):
                     closest_to_hitch = min(node.entries, key=lambda e: self._euclidean_distance(self.hitchhiker.center(),e.cf_data.center()))
                     closest_to_hitch.cf_data.add_cluster(self.hitchhiker, t, self.lambda_)
                 else:
-                    node.add_entry(Entry(cf_data=self.hitchhiker, is_leaf=True))
+                    node.add_entry(Entry(cf_data=self.hitchhiker))
                 self.hitchhiker=None
 
             closest = min(node.entries, key=lambda e: self._euclidean_distance(self.pending.center(), e.cf_data.center()))
@@ -87,16 +87,16 @@ class ClusTree(base.Clusterer):
             elif node.is_full():
                 if self.new_arrival:# TODO check if new arrival.
                     node.merge_entries(self._euclidean_distance)
-                    node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
+                    node.add_entry(Entry(cf_data=self.pending))
                     self.pending = None
                 elif node.is_full():
                     if self.try_discard_insignificant_entry(node):#check before merge???
-                        node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
+                        node.add_entry(Entry(cf_data=self.pending))
                         self.pending = None
                     self.current_node = self.split(node) #returns parent
                     self.update_one()
             else:
-                node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
+                node.add_entry(Entry(cf_data=self.pending))
                 self.pending=None
         return self
 
@@ -238,16 +238,16 @@ class ClusTree(base.Clusterer):
 
         if node.parent is None:#check for if parent is the root
             new_root = Node()
-            new_root.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node1))
-            new_root.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node2))
+            new_root.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), child=node1))
+            new_root.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), child=node2))
             self.root = new_root
             self.take_snapshot()
             return new_root
         else:
             parent = node.parent
             parent.entries = [e for e in parent.entries if e.child != node]
-            parent.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node1))
-            parent.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node2))
+            parent.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), child=node1))
+            parent.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), child=node2))
             if parent.is_full():
                 if self.try_discard_insignificant_entry(parent):
                     self.take_snapshot()
@@ -340,9 +340,8 @@ class ClusterFeature(base.Base):
         self.SS = None
 
 class Entry(base.Base):
-    def __init__(self, cf_data, is_leaf, cf_buffer=None, child=None):
+    def __init__(self, cf_data, cf_buffer=None, child=None):
         self.cf_data = cf_data
-        self.is_leaf = is_leaf
         self.cf_buffer = cf_buffer
         self.child = child
 
