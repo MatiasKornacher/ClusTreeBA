@@ -1,6 +1,5 @@
 from river import base, cluster, stats, utils
 import math
-import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
 import copy
 
@@ -23,6 +22,7 @@ class ClusTree(base.Clusterer):
         self.use_aggregation = use_aggregation
         self.max_aggregates = max_aggregates
         self.new_arrival=False
+
     def learn_one(self, x):
         self.time += 1
         if self.use_aggregation:
@@ -32,6 +32,7 @@ class ClusTree(base.Clusterer):
             input_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v * v for k, v in x.items()}, timestamp=self.time)
             self.pending = input_cf
             while self.pending is not None:
+                print(f"[DEBUG]b root.entries: {[e.cf_data.n for e in self.root.entries]}")
                 self.update_one()
         return self
 
@@ -42,7 +43,8 @@ class ClusTree(base.Clusterer):
         # Handling of empty tree:
         if not node.entries:
             node.add_entry(Entry(cf_data=self.pending))
-            return self
+            self.pending = None
+            return
 
         node.decay_all_entries(t, self.lambda_)
 
@@ -61,6 +63,7 @@ class ClusTree(base.Clusterer):
                 self.hitchhiker = None
                 closest.cf_buffer.add_cluster(self.pending, t, self.lambda_)
                 self.pending = None
+                return
             if closest.cf_buffer:
                 if self.hitchhiker is None:
                     self.hitchhiker = closest.cf_buffer
@@ -68,7 +71,7 @@ class ClusTree(base.Clusterer):
                     self.hitchhiker.cf_data.add_cluster(closest.cf_buffer.cf_data, t, self.lambda_)
                 closest.cf_buffer = None
             self.current_node = closest.child
-            return self
+            return
 
         if node.is_leaf():
             if self.hitchhiker:
@@ -80,25 +83,29 @@ class ClusTree(base.Clusterer):
                     node.add_entry(Entry(cf_data=self.hitchhiker))
                 self.hitchhiker=None
 
-            closest = min(node.entries, key=lambda e: self._euclidean_distance(self.pending.center(), e.cf_data.center()))
+            # closest = min(node.entries, key=lambda e: self._euclidean_distance(self.pending.center(), e.cf_data.center()))
 
-            if self._euclidean_distance(self.pending.center(), closest.cf_data.center()) <= self.max_radius:
-                closest.cf_data.add_cluster(self.pending, t, self.lambda_)
+            # if self._euclidean_distance(self.pending.center(), closest.cf_data.center()) <= self.max_radius:
+            #     closest.cf_data.add_cluster(self.pending, t, self.lambda_)
             elif node.is_full():
                 if self.new_arrival:# TODO check if new arrival.
                     node.merge_entries(self._euclidean_distance)
                     node.add_entry(Entry(cf_data=self.pending))
                     self.pending = None
+                    return
                 elif node.is_full():
                     if self.try_discard_insignificant_entry(node):#check before merge???
                         node.add_entry(Entry(cf_data=self.pending))
                         self.pending = None
                     self.current_node = self.split(node) #returns parent
                     self.update_one()
+                    return
+
             else:
                 node.add_entry(Entry(cf_data=self.pending))
                 self.pending=None
-        return self
+                return
+
 
 
     def update_max_radius_from_leaves(self):
@@ -261,20 +268,31 @@ class ClusTree(base.Clusterer):
          self.snapshots.append(copy.deepcopy(self.root))
          self.last_snapshot_time = self.time
 
+    # @staticmethod
+    # def _euclidean_distance(a, b):
+    #     if a is None or b is None:
+    #          return float('inf')
+    #     keys = sorted(set(a.keys()) | set(b.keys()))
+    #     vec_a = np.array([a.get(k, 0.0) for k in keys]).reshape(1, -1)
+    #     vec_b = np.array([b.get(k, 0.0) for k in keys]).reshape(1, -1)
+    #     return float(euclidean_distances(vec_a, vec_b)[0, 0])
+
     @staticmethod
     def _euclidean_distance(a, b):
         if a is None or b is None:
-             return float('inf')
-        keys = sorted(set(a.keys()) | set(b.keys()))
-        vec_a = np.array([a.get(k, 0.0) for k in keys]).reshape(1, -1)
-        vec_b = np.array([b.get(k, 0.0) for k in keys]).reshape(1, -1)
-        return float(euclidean_distances(vec_a, vec_b)[0, 0])
+            return float('inf')
 
+        keys = sorted(set(a) | set(b))
+        vec_a = [[a.get(k, 0.0) for k in keys]]
+        vec_b = [[b.get(k, 0.0) for k in keys]]
+        return float(euclidean_distances(vec_a, vec_b)[0, 0])
 
 
 class ClusterFeature(base.Base):
     # noinspection PyPep8Naming
     def __init__(self, n=0, LS=None, SS=None, timestamp=0):
+        if n > 1e12 or math.isinf(n):
+            print(f"[INIT WARNING] Large n in constructor: {n}")
         self.n = n
         self.LS = LS
         self.SS = SS
@@ -283,7 +301,11 @@ class ClusterFeature(base.Base):
     def center(self):
         if self.n == 0 or self.LS is None:
             return None
+        if self.n > 1e12:
+            print(f"[CENTER WARNING] self.n is too large: {self.n}, LS: {self.LS}")
+            raise ValueError("ClusterFeature.n too large in center()")
         return {k: v / self.n for k, v in self.LS.items()}
+
 
     def add_object(self, object_, current_time, lambda_):
         self.decay(current_time, lambda_)
@@ -318,6 +340,9 @@ class ClusterFeature(base.Base):
             self.SS[k] -= cf.SS[k]
 
     def decay(self, current_time, lambda_):
+        if self.timestamp is None:
+            self.timestamp = current_time
+            return
         dt = current_time - self.timestamp
         if dt <= 0: #check for no time passed
             return
@@ -326,12 +351,11 @@ class ClusterFeature(base.Base):
         if self.LS is not None:
             for x in self.LS:
                 self.LS[x] *= decay_factor
-            #self.LS = [x * decay_factor for x in self.LS]
         if self.SS is not None:
             for x in self.SS:
                 self.SS[x] *= decay_factor
-            #self.SS = [x * decay_factor for x in self.SS]
         self.timestamp = current_time
+
 
 
     def clear(self):
