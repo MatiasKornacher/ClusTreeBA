@@ -6,11 +6,12 @@ import copy
 
 
 class ClusTree(base.Clusterer):
-    def __init__(self, root, lambda_=0.1, max_radius=1.0, tsnap=100, beta=2, use_aggregation=False):
+    def __init__(self, root, lambda_=0.1, max_radius=1.0, tsnap=100, beta=2, use_aggregation=False, max_aggregates=10):
         super().__init__()
         self.root=root
         self.current_node=self.root
         self.hitchhiker=None
+        self.pending=None
         self.lambda_ = lambda_
         self.max_radius = max_radius
         self.time = 0
@@ -20,44 +21,46 @@ class ClusTree(base.Clusterer):
         self.beta = beta
         self.aggregates = []
         self.use_aggregation = use_aggregation
-
+        self.max_aggregates = max_aggregates
+        self.new_arrival=False
     def learn_one(self, x):
         self.time += 1
         if self.use_aggregation:
             self.aggregate_or_update(x)
         else:
-            self.update_one(x)
+            #conversion to cf
+            input_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v * v for k, v in x.items()}, timestamp=self.time)
+            self.pending = input_cf
+            while self.pending is not None:
+                self.update_one()
         return self
 
-    def update_one(self,x):
+    def update_one(self):
         t = self.time
         node = self.current_node
 
-        if isinstance(x, dict):
-            input_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v * v for k, v in x.items()},timestamp=t)
-        elif isinstance(x, ClusterFeature):
-            input_cf = x
-        else:
-            raise TypeError(f"update() expects dict or ClusterFeature, got {type(x)}")
-
         # Handling of empty tree:
         if not node.entries:
-            node.add_entry(Entry(cf_data=input_cf, is_leaf=True))
+            node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
             return self
 
         node.decay_all_entries(t, self.lambda_)
 
         if not node.is_leaf():
-            closest = min(node.entries, key=lambda e: self._euclidean_distance(input_cf.center(), e.cf_data.center()))
+            closest = min(node.entries, key=lambda e: self._euclidean_distance(self.pending.center(), e.cf_data.center()))
 
             if self.hitchhiker is not None:
                 #check for same closest entries
                 closest_to_hitch = min(node.entries,key=lambda e: self._euclidean_distance(self.hitchhiker.cf_data.center(), e.cf_data.center()))
 
                 if closest_to_hitch is not closest:
-                    closest_to_hitch.cf_buffer = self.hitchhiker
+                    closest_to_hitch.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
                     self.hitchhiker = None
-
+            if self.new_arrival:#TODO check if new arrival.
+                closest.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
+                self.hitchhiker = None
+                closest.cf_buffer.add_cluster(self.pending, t, self.lambda_)
+                self.pending = None
             if closest.cf_buffer:
                 if self.hitchhiker is None:
                     self.hitchhiker = closest.cf_buffer
@@ -65,7 +68,7 @@ class ClusTree(base.Clusterer):
                     self.hitchhiker.cf_data.add_cluster(closest.cf_buffer.cf_data, t, self.lambda_)
                 closest.cf_buffer = None
             self.current_node = closest.child
-
+            return self
 
         if node.is_leaf():
             if self.hitchhiker:
@@ -77,19 +80,24 @@ class ClusTree(base.Clusterer):
                     node.add_entry(Entry(cf_data=self.hitchhiker, is_leaf=True))
                 self.hitchhiker=None
 
-            closest = min(node.entries, key=lambda e: self._euclidean_distance(input_cf.center(), e.cf_data.center()))
+            closest = min(node.entries, key=lambda e: self._euclidean_distance(self.pending.center(), e.cf_data.center()))
 
-            if self._euclidean_distance(input_cf.center(), closest.cf_data.center()) <= self.max_radius:
-                closest.cf_data.add_cluster(input_cf, t, self.lambda_)
+            if self._euclidean_distance(self.pending.center(), closest.cf_data.center()) <= self.max_radius:
+                closest.cf_data.add_cluster(self.pending, t, self.lambda_)
             elif node.is_full():
-                node.merge_entries(self._euclidean_distance)
-                if node.is_full():  # still too full after merging
-                    if self.try_discard_insignificant_entry(node):
-                        return self.update_one(input_cf)  # bc true means we removed one
-                    self.split(node)
-                    return self.update_one(input_cf)
+                if self.new_arrival:# TODO check if new arrival.
+                    node.merge_entries(self._euclidean_distance)
+                    node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
+                    self.pending = None
+                elif node.is_full():
+                    if self.try_discard_insignificant_entry(node):#check before merge???
+                        node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
+                        self.pending = None
+                    self.current_node = self.split(node) #returns parent
+                    self.update_one()
             else:
-                node.add_entry(Entry(cf_data=input_cf, is_leaf=True))
+                node.add_entry(Entry(cf_data=self.pending, is_leaf=True))
+                self.pending=None
         return self
 
 
@@ -120,7 +128,7 @@ class ClusTree(base.Clusterer):
         if leaf_vars:
             self.max_radius = sum(leaf_vars) / len(leaf_vars)
 
-    def aggregate_or_update(self, x, max_aggregates=10):#max_aggregates?TODO global
+    def aggregate_or_update(self, x):
         t = self.time
         closest_cf = None
         closest_dist = float('inf')
@@ -142,10 +150,11 @@ class ClusTree(base.Clusterer):
             new_cf = ClusterFeature(n=1,LS=x.copy(),SS={k: v ** 2 for k, v in x.items()},timestamp=t)
             self.aggregates.append(new_cf)
 
-        if len(self.aggregates) > max_aggregates: 
+        if len(self.aggregates) > self.max_aggregates:
             self.aggregates.sort(key=lambda agg: (-agg.n, agg.timestamp))
             cf_to_insert = self.aggregates.pop(0)
-            self.update_one(cf_to_insert)
+            self.pending = cf_to_insert
+            self.update_one()
 
     def predict_one(self, x):
         leaf_entries = [] #get all leafs, maybe own method
@@ -161,7 +170,7 @@ class ClusTree(base.Clusterer):
         traverse(self.root)
 
         if not leaf_entries:
-            return 0  # fallback
+            raise ValueError("Tree is empty.")
         closest_entry = min(
             leaf_entries,
             key=lambda e: self._euclidean_distance(x, e.cf_data.center())
@@ -196,7 +205,7 @@ class ClusTree(base.Clusterer):
         t=self.time
         max_dist = -1
 
-        entry1, entry2 = None, None #ToDo maybe own method
+        entry1, entry2 = None, None
         for i in range(len(node.entries)):
             for j in range(i + 1, len(node.entries)):
                 c1 = node.entries[i].cf_data.center()
@@ -218,25 +227,35 @@ class ClusTree(base.Clusterer):
             d2 = self._euclidean_distance(entry.cf_data.center(), entry2.cf_data.center())
             if d1 < d2:
                 node1.add_entry(entry)
+                if entry.child:
+                    entry.child.parent = node1
             else:
                 node2.add_entry(entry)
+                if entry.child:
+                    entry.child.parent = node2
+
+        node.entries.clear()
 
         if node.parent is None:#check for if parent is the root
             new_root = Node()
             new_root.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node1))
             new_root.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node2))
             self.root = new_root
+            self.take_snapshot()
+            return new_root
         else:
             parent = node.parent
             parent.entries = [e for e in parent.entries if e.child != node]
             parent.add_entry(Entry(cf_data=node1.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node1))
             parent.add_entry(Entry(cf_data=node2.aggregate_cf(current_time=t, lambda_=self.lambda_), is_leaf=False, child=node2))
-
             if parent.is_full():
                 if self.try_discard_insignificant_entry(parent):
-                    return
+                    self.take_snapshot()
+                    return node.parent
                 self.split(parent)  #recursive split if parent now overflows
-        self.take_snapshot()
+
+            self.take_snapshot()
+            return node.parent
 
     def take_snapshot(self):
          self.snapshots.append(copy.deepcopy(self.root))
@@ -340,6 +359,7 @@ class Entry(base.Base):
         self.cf_data.add_cluster(other.cf_data)
 
 class Node(base.Base):
+
     MAX_ENTRIES = 3
 
     def __init__(self, parent=None):
@@ -367,22 +387,21 @@ class Node(base.Base):
         return len(self.entries) >= self.MAX_ENTRIES
 
     def merge_entries(self,distance_calc):
-        while len(self.entries) > self.MAX_ENTRIES:
-            min_dist = float('inf')
-            pair = None
-            for i in range(len(self.entries)):
-                for j in range(i + 1, len(self.entries)):
-                    d = distance_calc(
-                        self.entries[i].cf_data.center(),
-                        self.entries[j].cf_data.center()
-                    )
-                    if d < min_dist:
-                        min_dist = d
-                        pair = (i, j)
+        min_dist = float('inf')
+        pair = None
+        for i in range(len(self.entries)):
+            for j in range(i + 1, len(self.entries)):
+                d = distance_calc(
+                    self.entries[i].cf_data.center(),
+                    self.entries[j].cf_data.center()
+                )
+                if d < min_dist:
+                    min_dist = d
+                    pair = (i, j)
 
-            i, j = pair
-            self.entries[i].merge_with(self.entries[j])
-            del self.entries[j]
+        i, j = pair
+        self.entries[i].merge_with(self.entries[j])
+        del self.entries[j]
 
     def decay_all_entries(self, current_time, lambda_):
         for entry in self.entries:
