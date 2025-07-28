@@ -30,8 +30,6 @@ class ClusTree(base.Clusterer):
             #conversion to cf
             input_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v * v for k, v in x.items()}, timestamp=self.time)
             self.pending = input_cf
-            while self.pending is not None:
-                self.update_one()
         return self
 
     def update_one(self):
@@ -135,7 +133,7 @@ class ClusTree(base.Clusterer):
         if leaf_vars:
             self.max_radius = sum(leaf_vars) / len(leaf_vars)
 
-    def aggregate_or_update(self, x):
+    def aggregate_or_update(self, x):#misleading name now, update happens separately
         t = self.time
         closest_cf = None
         closest_dist = float('inf')
@@ -161,7 +159,7 @@ class ClusTree(base.Clusterer):
             self.aggregates.sort(key=lambda agg: (-agg.n, agg.timestamp))
             cf_to_insert = self.aggregates.pop(0)
             self.pending = cf_to_insert
-            self.update_one()
+
 
     def predict_one(self, x):
         leaf_entries = [] #get all leafs, maybe own method
