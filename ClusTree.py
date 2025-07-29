@@ -4,8 +4,10 @@ import copy
 
 
 class ClusTree(base.Clusterer):
-    def __init__(self, root, lambda_=0.1, max_radius=1.0, tsnap=100, beta=2, use_aggregation=False, max_aggregates=10):
+    def __init__(self, root=None, lambda_=0.1, max_radius=1.0, beta=2, use_aggregation=False, max_aggregates=10):
         super().__init__()
+        if root is None:
+            root = Node()
         self.root=root
         self.current_node=self.root
         self.hitchhiker=None
@@ -13,7 +15,6 @@ class ClusTree(base.Clusterer):
         self.lambda_ = lambda_
         self.max_radius = max_radius
         self.time = 0
-        self.tsnap = tsnap
         self.snapshots = []
         self.last_snapshot_time = 0
         self.beta = beta
@@ -24,6 +25,7 @@ class ClusTree(base.Clusterer):
 
     def learn_one(self, x):
         self.time += 1
+        self.current_node = self.root
         if self.use_aggregation:
             self.aggregate_or_update(x)
         else:
@@ -32,15 +34,18 @@ class ClusTree(base.Clusterer):
             self.pending = input_cf
         return self
 
-    def update_one(self):
+    def update_one(self, final):
         t = self.time
         node = self.current_node
+
+        if self.pending is None: #safety
+            return True
 
         # Handling of empty tree:
         if not node.entries:
             node.add_entry(Entry(cf_data=self.pending))
             self.pending = None
-            return
+            return True
 
         node.decay_all_entries(t, self.lambda_)
 
@@ -54,12 +59,12 @@ class ClusTree(base.Clusterer):
                 if closest_to_hitch is not closest:
                     closest_to_hitch.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
                     self.hitchhiker = None
-            if self.new_arrival:#TODO check if new arrival.
+            if final:
                 closest.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
                 self.hitchhiker = None
                 closest.cf_buffer.add_cluster(self.pending, t, self.lambda_)
                 self.pending = None
-                return
+                return True
             if closest.cf_buffer:
                 if self.hitchhiker is None:
                     self.hitchhiker = closest.cf_buffer
@@ -67,7 +72,7 @@ class ClusTree(base.Clusterer):
                     self.hitchhiker.cf_data.add_cluster(closest.cf_buffer.cf_data, t, self.lambda_)
                 closest.cf_buffer = None
             self.current_node = closest.child
-            return
+            return False
 
         if node.is_leaf():
             if self.hitchhiker:
@@ -79,32 +84,26 @@ class ClusTree(base.Clusterer):
                     node.add_entry(Entry(cf_data=self.hitchhiker))
                 self.hitchhiker=None
 
-            # closest = min(node.entries, key=lambda e: self._euclidean_distance(self.pending.center(), e.cf_data.center()))
-
-            # if self._euclidean_distance(self.pending.center(), closest.cf_data.center()) <= self.max_radius:
-            #     closest.cf_data.add_cluster(self.pending, t, self.lambda_)
-
             elif node.is_full():
-                if self.new_arrival:# TODO check if new arrival.
-                    node.merge_entries(self._euclidean_distance)
+                if final:
+                    node.merge_entries(self._euclidean_distance, t, self.lambda_ )
                     node.add_entry(Entry(cf_data=self.pending))
                     self.pending = None
-                    return
+                    return True
                 elif node.is_full():
                     if self.try_discard_insignificant_entry(node):#check before merge???
                         node.add_entry(Entry(cf_data=self.pending))
                         self.pending = None
-                        return
+                        return True
                     self.current_node = self.split(node) #returns parent
-                    self.update_one()
-                    return
+                    return self.update_one(False)#Todo is this recursion ok?
+                return True
 
             else:
                 node.add_entry(Entry(cf_data=self.pending))
                 self.pending=None
-                return
-
-
+                return True
+        return True #fallback
 
     def update_max_radius_from_leaves(self):
         leaf_vars = []
@@ -349,8 +348,6 @@ class ClusterFeature(base.Base):
                 self.SS[x] *= decay_factor
         self.timestamp = current_time
 
-
-
     def clear(self):
         self.n = 0
         self.LS = None
@@ -371,8 +368,8 @@ class Entry(base.Base):
             agg_cf.add_cluster(entry.cf_data, current_time, lambda_)
         return agg_cf
 
-    def merge_with(self, other):
-        self.cf_data.add_cluster(other.cf_data)
+    def merge_with(self, other, current_time, lambda_):
+        self.cf_data.add_cluster(other.cf_data, current_time, lambda_)
 
 class Node(base.Base):
 
@@ -402,7 +399,7 @@ class Node(base.Base):
     def is_full(self):
         return len(self.entries) >= self.MAX_ENTRIES
 
-    def merge_entries(self,distance_calc):
+    def merge_entries(self,distance_calc,current_time, lambda_):
         min_dist = float('inf')
         pair = None
         for i in range(len(self.entries)):
@@ -416,7 +413,7 @@ class Node(base.Base):
                     pair = (i, j)
 
         i, j = pair
-        self.entries[i].merge_with(self.entries[j])
+        self.entries[i].merge_with(self.entries[j], current_time, lambda_ )
         del self.entries[j]
 
     def decay_all_entries(self, current_time, lambda_):
