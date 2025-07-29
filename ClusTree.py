@@ -54,22 +54,30 @@ class ClusTree(base.Clusterer):
 
             if self.hitchhiker is not None:
                 #check for same closest entries
-                closest_to_hitch = min(node.entries,key=lambda e: self._euclidean_distance(self.hitchhiker.cf_data.center(), e.cf_data.center()))
+                closest_to_hitch = min(node.entries,key=lambda e: self._euclidean_distance(self.hitchhiker.center(), e.cf_data.center()))
 
                 if closest_to_hitch is not closest:
-                    closest_to_hitch.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
+                    if closest_to_hitch.cf_buffer is not None:
+                        closest_to_hitch.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
+                    else:
+                        closest_to_hitch.cf_buffer = self.hitchhiker
                     self.hitchhiker = None
             if final:
-                closest.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
-                self.hitchhiker = None
-                closest.cf_buffer.add_cluster(self.pending, t, self.lambda_)
-                self.pending = None
+                if closest.cf_buffer is None:
+                    closest.cf_buffer = self.pending
+                    self.pending = None
+                else:
+                    closest.cf_buffer.add_cluster(self.pending, t, self.lambda_)
+                    self.pending = None
+                if self.hitchhiker is not None:
+                    closest.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
+                    self.hitchhiker = None
                 return True
             if closest.cf_buffer:
                 if self.hitchhiker is None:
                     self.hitchhiker = closest.cf_buffer
                 else:
-                    self.hitchhiker.cf_data.add_cluster(closest.cf_buffer.cf_data, t, self.lambda_)
+                    self.hitchhiker.add_cluster(closest.cf_buffer, t, self.lambda_)
                 closest.cf_buffer = None
             self.current_node = closest.child
             return False
@@ -175,11 +183,19 @@ class ClusTree(base.Clusterer):
 
         if not leaf_entries:
             raise ValueError("Tree is empty.")
-        closest_entry = min(
-            leaf_entries,
-            key=lambda e: self._euclidean_distance(x, e.cf_data.center())
+
+        # closest_entry = min(
+        #     leaf_entries,
+        #     key=lambda e: self._euclidean_distance(x, e.cf_data.center())
+        # )
+        # return closest_entry.cf_data.center()
+
+        best_idx = min(
+            range(len(leaf_entries)),
+            key=lambda i: self._euclidean_distance(x, leaf_entries[i].cf_data.center())
         )
-        return closest_entry.cf_data.center()
+        return best_idx
+
 
     def try_discard_insignificant_entry(self, node):#check if entry can be removed. return true if removes something, false else
         if len(node.entries) < node.MAX_ENTRIES: #check if even necessary
