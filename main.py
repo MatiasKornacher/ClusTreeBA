@@ -4,6 +4,9 @@ import csv
 
 from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score
 
+import numpy as np
+from clustpy.metrics.clustering_metrics import unsupervised_clustering_accuracy
+
 import river.cluster.clustream as clustream
 import river.cluster.dbstream as dbstream
 import river.cluster.denstream as denstream
@@ -61,7 +64,10 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 			timebalance += start - stop
 
 		if not done:
-			alg.update_one(final=True)
+			start = time.time()
+			done = alg.update_one(final=False)
+			stop = time.time()
+			timebalance += start - stop
 
 		if done:
 			timebalance = min(0, timebalance)
@@ -83,7 +89,10 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 
 			ari = adjusted_rand_score(true_list, predict_list)
 			ami = adjusted_mutual_info_score(true_list, predict_list)
-			print(f"[{i + 1}] Window, ARI: {ari}, AMI: {ami}")
+			tl = np.array(true_list, dtype=int)
+			pl = np.array(predict_list, dtype=int)
+			acc = unsupervised_clustering_accuracy(tl, pl)
+			print(f"[{i + 1}] Window, ARI: {ari}, AMI: {ami}, ACC: {acc}")
 
 
 			datastream_store = []
@@ -96,24 +105,51 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 
 
 if __name__ == '__main__':
-	DATA_FILE = 'RBF3_40000.csv'
-	with open(DATA_FILE, newline='') as fp:
-		reader = csv.DictReader(fp)
-		x, y = [], []
-		for row in itertools.islice(reader,5000):
-			label = row.pop('class')
+
+	MAX_ROWS = 5000
+	DATA_FILE1 = 'RBF3_40000.csv'
+	with open(DATA_FILE1, newline='') as fp1:
+		reader = csv.DictReader(fp1)
+		x1, y1 = [], []
+		for row in itertools.islice(reader,MAX_ROWS	):
+			raw_lbl = row.pop('class')
 			try:
-				lbl = int(label)
+				lbl = int(raw_lbl)
 			except ValueError:
 				lbl = -1
-			y.append(lbl)
-			x.append({k: float(v) for k, v in row.items()})
+			y1.append(lbl)
+			x1.append({k: float(v) for k, v in row.items()})
 
-	datastream = iter(zip(x, y))
-	clu_num = len(set(y))
 
-	# main(alg = clustream.CluStream(n_macro_clusters=clu_num), datastream=datastream, timesteps = [0.0001, 0.001, 0.01], eval_timestep=1000, convdict = False)
-	# main(alg = dbstream.DBSTREAM(clustering_threshold=0.2), datastream=datastream, timesteps=[0.0001, 0.001, 0.01], eval_timestep=1000, convdict=False)
-	# main(alg=denstream.DenStream(decaying_factor=0.01, beta=0.5, mu=5, epsilon=0.05, n_samples_init=500, stream_speed=100), datastream=datastream, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
-	# main(alg=streamkmeans.STREAMKMeans(n_clusters=clu_num, chunk_size=500), datastream=datastream, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
-	main(alg=ClusTree(), datastream=datastream,timesteps=[0.0001, 0.001, 0.01], eval_timestep=1000, convdict=False)
+
+	synth = iter(zip(x1, y1))
+	synth_clu_num = len(set(y1))
+
+	DATA_FILE2 ='fert_vs_gdp.arff'
+	with open(DATA_FILE2) as fp2:
+		for line in fp2:
+			if line.startswith('@data'):
+				break
+		reader = csv.DictReader(fp2, fieldnames=['children_per_women', 'GDP_per_capita', 'class'])
+		x2, y2 = [], []
+		for row in itertools.islice(reader, MAX_ROWS):
+			raw_lbl = row.pop('class')
+			try:
+				lbl = int(raw_lbl)
+			except ValueError:
+				lbl = -1
+			y2.append(lbl)
+			x2.append({k: float(v) for k, v in row.items()})
+
+	real = iter(zip(x2, y2))
+	real_clu_num = len(set(y2))
+
+
+
+
+	# timesteps = [0.0001, 0.001, 0.01],
+	# main(alg = clustream.CluStream(n_macro_clusters=synth_clu_num), datastream=synth, timesteps = [0.0001, 0.001, 0.01], eval_timestep=1000, convdict = False)
+	# main(alg = dbstream.DBSTREAM(clustering_threshold=0.2), datastream=synth, timesteps=[0.0001, 0.001, 0.01], eval_timestep=1000, convdict=False)
+	# main(alg=denstream.DenStream(decaying_factor=0.01, beta=0.5, mu=5, epsilon=0.05, n_samples_init=500, stream_speed=100), datastream=synth, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
+	# main(alg=streamkmeans.STREAMKMeans(n_clusters=synth_clu_num, chunk_size=500), datastream=synth, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
+	main(alg=ClusTree(), datastream=real,timesteps=[0.0001], eval_timestep=1000, convdict=False)

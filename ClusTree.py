@@ -27,7 +27,7 @@ class ClusTree(base.Clusterer):
         self.time += 1
         self.current_node = self.root
         if self.use_aggregation:
-            self.aggregate_or_update(x)
+            self.aggregate_check(x)
         else:
             #conversion to cf
             input_cf = ClusterFeature(n=1, LS=x.copy(), SS={k: v * v for k, v in x.items()}, timestamp=self.time)
@@ -144,7 +144,7 @@ class ClusTree(base.Clusterer):
         if leaf_vars:
             self.max_radius = sum(leaf_vars) / len(leaf_vars)
 
-    def aggregate_or_update(self, x):#misleading name now, update happens separately
+    def aggregate_check(self, x):
         t = self.time
         closest_cf = None
         closest_dist = float('inf')
