@@ -63,15 +63,19 @@ class ClusTree(base.Clusterer):
                         closest_to_hitch.cf_buffer = self.hitchhiker
                     self.hitchhiker = None
             if final:
+                if self.hitchhiker is not None:
+                    if closest.cf_buffer is None:
+                        closest.cf_buffer = self.hitchhiker
+                    else:
+                        closest.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
+                    self.hitchhiker = None
+
                 if closest.cf_buffer is None:
                     closest.cf_buffer = self.pending
-                    self.pending = None
                 else:
                     closest.cf_buffer.add_cluster(self.pending, t, self.lambda_)
-                    self.pending = None
-                if self.hitchhiker is not None:
-                    closest.cf_buffer.add_cluster(self.hitchhiker, t, self.lambda_)
-                    self.hitchhiker = None
+                self.pending = None
+
                 return True
             if closest.cf_buffer:
                 if self.hitchhiker is None:
@@ -104,7 +108,7 @@ class ClusTree(base.Clusterer):
                         self.pending = None
                         return True
                     self.current_node = self.split(node) #returns parent
-                    return self.update_one(False)#Todo is this recursion ok?
+                    return False
                 return True
 
             else:

@@ -100,7 +100,7 @@ if __name__ == '__main__':
 	with open(DATA_FILE, newline='') as fp:
 		reader = csv.DictReader(fp)
 		x, y = [], []
-		for row in itertools.islice(reader,100):
+		for row in itertools.islice(reader,5000):
 			label = row.pop('class')
 			try:
 				lbl = int(label)
@@ -116,4 +116,4 @@ if __name__ == '__main__':
 	# main(alg = dbstream.DBSTREAM(clustering_threshold=0.2), datastream=datastream, timesteps=[0.0001, 0.001, 0.01], eval_timestep=1000, convdict=False)
 	# main(alg=denstream.DenStream(decaying_factor=0.01, beta=0.5, mu=5, epsilon=0.05, n_samples_init=500, stream_speed=100), datastream=datastream, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
 	# main(alg=streamkmeans.STREAMKMeans(n_clusters=clu_num, chunk_size=500), datastream=datastream, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
-	main(alg=ClusTree(), datastream=datastream,timesteps=[0.0001, 0.001, 0.01], eval_timestep=10, convdict=False)
+	main(alg=ClusTree(), datastream=datastream,timesteps=[0.0001, 0.001, 0.01], eval_timestep=1000, convdict=False)
