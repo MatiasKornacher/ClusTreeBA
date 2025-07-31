@@ -1,6 +1,7 @@
 import itertools
 import time
 import csv
+import argparse
 
 from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score
 
@@ -14,6 +15,43 @@ import river.cluster.streamkmeans as streamkmeans
 
 from ClusTree import ClusTree
 
+def parse_args():
+	parser = argparse.ArgumentParser(
+		prog='main',
+		description = 'mainparser'
+	)
+
+	parser.add_argument(
+		"--data", "-d",
+		required=True,
+		help="Dataset to use (real or synth)."
+	)
+
+	parser.add_argument(
+        "--algorithm", "-a",
+        required=True, choices=["CluStream","DenStream","DBSTREAM","StreamKMeans","ClusTree"],
+        help="Which clustering algorithm to run."
+    )
+
+	parser.add_argument(
+		"--timestep", "-t",
+		type=float, choices=[0.0001, 0.001, 0.01],
+		help="Window size (number of points) between evaluations."
+	)
+
+	parser.add_argument(
+        "--eval-timestep", "-e",
+        type=int, default=1000,
+        help="Window size (number of points) between evaluations."
+    )
+
+	parser.add_argument(
+        "--convdict",
+        action="store_true",
+        help="If set, convert tuple/array datapoints to dicts via `dict(enumerate(x))`."
+    )
+
+	return parser.parse_args()
 
 def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 
@@ -105,51 +143,63 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 
 
 if __name__ == '__main__':
-
+	args = parse_args()
 	MAX_ROWS = 5000
-	DATA_FILE1 = 'RBF3_40000.csv'
-	with open(DATA_FILE1, newline='') as fp1:
-		reader = csv.DictReader(fp1)
-		x1, y1 = [], []
-		for row in itertools.islice(reader,MAX_ROWS	):
-			raw_lbl = row.pop('class')
-			try:
-				lbl = int(raw_lbl)
-			except ValueError:
-				lbl = -1
-			y1.append(lbl)
-			x1.append({k: float(v) for k, v in row.items()})
+
+	if args.data.lower()=="synth":
+
+		DATA_FILE1 = 'RBF3_40000.csv'
+		with open(DATA_FILE1, newline='') as fp1:
+			reader = csv.DictReader(fp1)
+			x, y = [], []
+			for row in itertools.islice(reader,MAX_ROWS	):
+				raw_lbl = row.pop('class')
+				try:
+					lbl = int(raw_lbl)
+				except ValueError:
+					lbl = -1
+				y.append(lbl)
+				x.append({k: float(v) for k, v in row.items()})
+		datastream = iter(zip(x, y))
+		clu_num = len(set(y))
 
 
+	elif args.data.lower() == "real":
+		DATA_FILE2 ='fert_vs_gdp.arff'
+		with open(DATA_FILE2) as fp2:
+			for line in fp2:
+				if line.startswith('@data'):
+					break
+			reader = csv.DictReader(fp2, fieldnames=['children_per_women', 'GDP_per_capita', 'class'])
+			x, y = [], []
+			for row in itertools.islice(reader, MAX_ROWS):
+				raw_lbl = row.pop('class')
+				try:
+					lbl = int(raw_lbl)
+				except ValueError:
+					lbl = -1
+				y.append(lbl)
+				x.append({k: float(v) for k, v in row.items()})
 
-	synth = iter(zip(x1, y1))
-	synth_clu_num = len(set(y1))
+		datastream = iter(zip(x, y))
+		clu_num = len(set(y))
 
-	DATA_FILE2 ='fert_vs_gdp.arff'
-	with open(DATA_FILE2) as fp2:
-		for line in fp2:
-			if line.startswith('@data'):
-				break
-		reader = csv.DictReader(fp2, fieldnames=['children_per_women', 'GDP_per_capita', 'class'])
-		x2, y2 = [], []
-		for row in itertools.islice(reader, MAX_ROWS):
-			raw_lbl = row.pop('class')
-			try:
-				lbl = int(raw_lbl)
-			except ValueError:
-				lbl = -1
-			y2.append(lbl)
-			x2.append({k: float(v) for k, v in row.items()})
+	else:
+		raise ValueError(f"Unknown dataset: {args.data}")
 
-	real = iter(zip(x2, y2))
-	real_clu_num = len(set(y2))
+	alg_map = {
+		"CluStream": clustream.CluStream(n_macro_clusters=clu_num),
+		"DBSTREAM": dbstream.DBSTREAM(clustering_threshold=0.2),
+		"DenStream": denstream.DenStream(epsilon=0.05, beta=0.5, mu=5, decaying_factor=0.01, n_samples_init=500, stream_speed=100),
+		"STREAMKMeans": streamkmeans.STREAMKMeans(n_clusters=clu_num, chunk_size=500),
+		"ClusTree": ClusTree(use_aggregation=False)
+	}
+	algorithm = alg_map[args.algorithm]
 
-
-
-
+	main(alg=algorithm, datastream=datastream, timesteps=args.timestep, eval_timestep=args.eval_timestep, convdict = args.convdict)
 	# timesteps = [0.0001, 0.001, 0.01],
 	# main(alg = clustream.CluStream(n_macro_clusters=synth_clu_num), datastream=synth, timesteps = [0.0001, 0.001, 0.01], eval_timestep=1000, convdict = False)
 	# main(alg = dbstream.DBSTREAM(clustering_threshold=0.2), datastream=synth, timesteps=[0.0001, 0.001, 0.01], eval_timestep=1000, convdict=False)
-	# main(alg=denstream.DenStream(decaying_factor=0.01, beta=0.5, mu=5, epsilon=0.05, n_samples_init=500, stream_speed=100), datastream=synth, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
+	# main(alg=denstream.DenStream(decaying_factor=0.01, beta=0.5, mu=5, epsilon=0.05, n_samples_init=500, stream_speed=100), datastream=synth, timesteps=[0.0001],eval_timestep=1000, convdict=False)
 	# main(alg=streamkmeans.STREAMKMeans(n_clusters=synth_clu_num, chunk_size=500), datastream=synth, timesteps=[0.0001, 0.001, 0.01],eval_timestep=1000, convdict=False)
-	main(alg=ClusTree(), datastream=real,timesteps=[0.0001], eval_timestep=1000, convdict=False)
+	# main(alg=ClusTree(use_aggregation=False), datastream=synth,timesteps=[0.0001], eval_timestep=1000, convdict=False)
