@@ -29,7 +29,7 @@ def parse_args():
 
 	parser.add_argument(
         "--algorithm", "-a",
-        required=True, choices=["CluStream","DenStream","DBSTREAM","StreamKMeans","ClusTree"],
+        required=True, choices=["CluStream","DenStream","DBSTREAM","STREAMKMeans", "ClusTreeAgg", "ClusTreeNoAgg"],
         help="Which clustering algorithm to run."
     )
 
@@ -184,6 +184,26 @@ if __name__ == '__main__':
 		datastream = iter(zip(x, y))
 		clu_num = len(set(y))
 
+	elif args.data.lower() == "complex":
+		DATA_FILE2 ='complex8.arff'
+		with open(DATA_FILE2) as fp2:
+			for line in fp2:
+				if line.startswith('@DATA'):
+					break
+			reader = csv.DictReader(fp2, fieldnames=['xval', 'yval', 'class'])
+			x, y = [], []
+			for row in itertools.islice(reader, MAX_ROWS):
+				raw_lbl = row.pop('class')
+				try:
+					lbl = int(raw_lbl)
+				except ValueError:
+					lbl = -1
+				y.append(lbl)
+				x.append({k: float(v) for k, v in row.items()})
+
+		datastream = iter(zip(x, y))
+		clu_num = len(set(y))
+
 	else:
 		raise ValueError(f"Unknown dataset: {args.data}")
 
@@ -192,7 +212,8 @@ if __name__ == '__main__':
 		"DBSTREAM": dbstream.DBSTREAM(clustering_threshold=0.2),
 		"DenStream": denstream.DenStream(epsilon=0.05, beta=0.5, mu=5, decaying_factor=0.01, n_samples_init=500, stream_speed=100),
 		"STREAMKMeans": streamkmeans.STREAMKMeans(n_clusters=clu_num, chunk_size=500),
-		"ClusTree": ClusTree(use_aggregation=False)
+		"ClusTreeAgg": ClusTree(use_aggregation=True),
+		"ClusTreeNoAgg": ClusTree(use_aggregation=False	)
 	}
 	algorithm = alg_map[args.algorithm]
 

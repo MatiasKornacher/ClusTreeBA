@@ -186,7 +186,7 @@ class ClusTree(base.Clusterer):
         traverse(self.root)
 
         if not leaf_entries:
-            raise ValueError("Tree is empty.")
+            return -1
 
         # closest_entry = min(
         #     leaf_entries,
