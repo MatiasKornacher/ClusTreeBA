@@ -4,7 +4,7 @@ import copy
 
 
 class ClusTree(base.Clusterer):
-    def __init__(self, root=None, lambda_=0.1, max_radius=1.0, beta=2, use_aggregation=False, max_aggregates=10):
+    def __init__(self, root=None, lambda_=0.01, max_radius=0.5, beta=2, use_aggregation=False, max_aggregates=25):
         super().__init__()
         if root is None:
             root = Node()
@@ -170,6 +170,8 @@ class ClusTree(base.Clusterer):
             self.aggregates.sort(key=lambda agg: (-agg.n, agg.timestamp))
             cf_to_insert = self.aggregates.pop(0)
             self.pending = cf_to_insert
+
+
 
 
     def predict_one(self, x):

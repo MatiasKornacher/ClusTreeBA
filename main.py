@@ -4,6 +4,7 @@ import csv
 import argparse
 
 from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score
+from TSindex import tempsil
 
 import numpy as np
 from clustpy.metrics.clustering_metrics import unsupervised_clustering_accuracy
@@ -71,11 +72,19 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 	timebalance_list = []
 	learned_list = []
 	datastream_store = []
+	raw_features_list = []
 	predict_list = []
 	true_list = []
+	timestamp_list = []
 
 
 	for dp, label in datastream:
+
+		timestamp_list.append(time.time())
+		raw_dp = list(dp) if not isinstance(dp, dict) else list(dp.values())
+		raw_features_list.append(raw_dp)
+
+
 		if convdict:
 			dp = dict(enumerate(dp))
 
@@ -123,14 +132,28 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 				predict_list.append(pred if pred is not None else -1)
 				true_list.append(label)
 				correct = pred == label
-				print((i-len(datastream_store)+j), pred, label, timebalance, learned, correct)
+				print((i-len(datastream_store)+j), dp, pred, label, timebalance, learned, correct)
 
 			ari = adjusted_rand_score(true_list, predict_list)
+
 			ami = adjusted_mutual_info_score(true_list, predict_list)
+
 			tl = np.array(true_list, dtype=int)
 			pl = np.array(predict_list, dtype=int)
 			acc = unsupervised_clustering_accuracy(tl, pl)
-			print(f"[{i + 1}] Window, ARI: {ari}, AMI: {ami}, ACC: {acc}")
+
+
+			features_np = np.array(raw_features_list[-len(predict_list):])
+			labels_np = np.array(predict_list)
+			t = np.array(timestamp_list[-len(labels_np):])
+
+			if len(set(labels_np)) > 1:
+				ts_score = tempsil(t,features_np, labels_np)
+			else:
+				ts_score = float('nan')
+
+
+			print(f"[{i + 1}] Window, ARI: {ari}, AMI: {ami}, ACC: {acc}, TS: {ts_score}")
 
 
 			datastream_store = []
@@ -138,6 +161,7 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 			learned_list = []
 			true_list = []
 			predict_list = []
+			raw_features_list = raw_features_list[-len(predict_list):]
 
 
 
