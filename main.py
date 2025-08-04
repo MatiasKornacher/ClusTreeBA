@@ -148,7 +148,7 @@ def main(alg, datastream, timesteps, eval_timestep, convdict=True):
 			t = np.array(timestamp_list[-len(labels_np):])
 
 			if len(set(labels_np)) > 1:
-				ts_score = tempsil(t,features_np, labels_np)
+				_, _, ts_score = tempsil(t,features_np, labels_np)
 			else:
 				ts_score = float('nan')
 
